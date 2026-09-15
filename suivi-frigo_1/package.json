@@ -1,0 +1,32 @@
+{
+  "name": "suivi-frigo",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Relevés de température de frigo — traçabilité HACCP multi-fermes (PWA installable)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "vapid": "node scripts/generate-vapid.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "date-fns": "^3.6.0",
+    "exceljs": "^4.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "recharts": "^2.12.7",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.8",
+    "vite-plugin-pwa": "^0.20.5",
+    "workbox-core": "^7.1.0",
+    "workbox-precaching": "^7.1.0",
+    "workbox-routing": "^7.1.0",
+    "workbox-strategies": "^7.1.0"
+  }
+}
