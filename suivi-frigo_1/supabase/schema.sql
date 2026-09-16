@@ -336,11 +336,14 @@ returns table(jour date)
 language sql stable security definer set search_path = public as $$
   select d::date
   from generate_series(p_depuis, p_jusqu, interval '1 day') d
-  where not exists (
-    select 1 from public.releves r
-    where r.ferme_id = p_ferme
-      and r.date_releve = d::date
-      and r.statut = 'valide')
+  -- Pas de relevé attendu le samedi ni le dimanche : ces jours ne sont donc
+  -- jamais comptés comme manquants (isodow : 1 = lundi … 7 = dimanche).
+  where extract(isodow from d) < 6
+    and not exists (
+      select 1 from public.releves r
+      where r.ferme_id = p_ferme
+        and r.date_releve = d::date
+        and r.statut = 'valide')
 $$;
 grant execute on function public.jours_sans_releve to authenticated;
 
