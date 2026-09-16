@@ -463,11 +463,20 @@ function OngletComptes({ ferme, profil, setMsg }) {
             <div className="grille k2">
               <div className="champ">
                 <label htmlFor="cr">Rôle *</label>
-                <select id="cr" value={edition.role}
-                        onChange={(e) => setEdition({ ...edition, role: e.target.value })}>
-                  <option value="salarie">Salarié</option>
-                  <option value="admin">Administrateur</option>
-                </select>
+                {edition.role === 'super_admin' ? (
+                  /* Le rôle « Administrateur général » n'est pas proposé à la
+                     sélection : l'afficher dans une liste qui ne le contient pas
+                     ferait basculer le compte en « Salarié » au premier clic. */
+                  <select id="cr" value="super_admin" disabled>
+                    <option value="super_admin">Administrateur général</option>
+                  </select>
+                ) : (
+                  <select id="cr" value={edition.role}
+                          onChange={(e) => setEdition({ ...edition, role: e.target.value })}>
+                    <option value="salarie">Salarié</option>
+                    <option value="admin">Administrateur</option>
+                  </select>
+                )}
               </div>
               <div className="champ">
                 <label htmlFor="ct">Téléphone (SMS d’alerte)</label>
