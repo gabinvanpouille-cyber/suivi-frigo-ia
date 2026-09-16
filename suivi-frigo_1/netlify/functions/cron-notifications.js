@@ -17,6 +17,12 @@ function creneau(hhmm) {
   return `${String(h).padStart(2, '0')}:${m >= 30 ? '30' : '00'}`
 }
 
+/** Jour de la semaine local (0 = dimanche … 6 = samedi) dans le fuseau donné. */
+function jourSemaine(tz) {
+  const abrev = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(new Date())
+  return { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[abrev]
+}
+
 /** Évite un double envoi si la tâche est rejouée dans la même journée. */
 async function dejaEnvoye(admin, fermeId, type, titre) {
   const limite = new Date(Date.now() - 20 * 3600 * 1000).toISOString()
@@ -76,6 +82,16 @@ export default async (request) => {
     const estRappel = maintenant === rappel1 || maintenant === rappel2
     const estAlerte = maintenant === alerte
     if (!estRappel && !estAlerte) continue
+
+    /* Pas de relevé le samedi ni le dimanche : ni rappel aux salariés, ni
+       alerte de relevé manquant. Les alertes de dépassement de température
+       ne sont pas concernées : elles partent depuis notify-releve, à la
+       validation d'un relevé, quel que soit le jour. */
+    const jsem = jourSemaine(tz)
+    if (jsem === 0 || jsem === 6) {
+      journal.push({ ferme: ferme.code, heure: maintenant, action: 'week_end' })
+      continue
+    }
 
     /* Un relevé validé aujourd'hui suffit à tout éteindre. */
     const { count } = await admin
