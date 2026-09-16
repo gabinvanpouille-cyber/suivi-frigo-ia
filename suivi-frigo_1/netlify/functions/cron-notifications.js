@@ -9,7 +9,7 @@
  * L'heure est calculée dans le fuseau de chaque ferme : le passage à
  * l'heure d'été ou d'hiver n'a aucun effet sur les horaires. */
 import { clientAdmin, heureLocale, dateLocale, json } from './lib/commun.js'
-import { envoyerPush, journaliser, destinataires } from './lib/notifs.js'
+import { envoyerPush, envoyerSms, journaliser, destinataires } from './lib/notifs.js'
 
 /** Arrondit « HH:MM » au créneau de 30 minutes en cours. */
 function creneau(hhmm) {
@@ -98,6 +98,10 @@ export default async (request) => {
       const texte = maintenant === rappel1
         ? `Bonjour ! C’est l’heure de relever les températures des frigos de ${ferme.nom}.`
         : `Le relevé de ${ferme.nom} n’a pas encore été enregistré aujourd’hui.`
+      /* Version courte pour le SMS : un SMS standard tient en 160 caractères. */
+      const texteSms = maintenant === rappel1
+        ? `SUIVI FRIGO — ${ferme.nom} : relevé des températures à faire aujourd’hui.`
+        : `SUIVI FRIGO — ${ferme.nom} : le relevé des températures n’est toujours pas fait.`
 
       const salaries = await destinataires(admin, ferme.id, ['salarie'])
 
@@ -114,7 +118,8 @@ export default async (request) => {
           type: 'rappel', titre, corps: texte, lien: '/releve/nouveau',
           tag: `rappel-${ferme.id}-${jour}-${maintenant}`,
         })
-        journal.push({ ferme: ferme.code, heure: maintenant, action: 'rappel', ...envoi })
+        const sms = await envoyerSms(salaries.map((s) => s.telephone), texteSms)
+        journal.push({ ferme: ferme.code, heure: maintenant, action: 'rappel', ...envoi, sms })
       }
     }
 
@@ -124,6 +129,8 @@ export default async (request) => {
       const texte =
         `Aucun relevé de température n’a été validé aujourd’hui (${jour.split('-').reverse().join('/')}) ` +
         `pour ${ferme.nom}. Obligation de traçabilité non respectée.`
+      const texteSms =
+        `SUIVI FRIGO — ${ferme.nom} : aucun relevé validé aujourd’hui. Traçabilité non respectée.`
 
       const admins = await destinataires(admin, ferme.id, ['admin', 'super_admin'])
 
@@ -140,7 +147,8 @@ export default async (request) => {
           type: 'alerte_manquant', titre, corps: texte, lien: '/admin',
           tag: `manquant-${ferme.id}-${jour}`,
         })
-        journal.push({ ferme: ferme.code, heure: maintenant, action: 'alerte_manquant', ...envoi })
+        const sms = await envoyerSms(admins.map((a) => a.telephone), texteSms)
+        journal.push({ ferme: ferme.code, heure: maintenant, action: 'alerte_manquant', ...envoi, sms })
       }
     }
   }
