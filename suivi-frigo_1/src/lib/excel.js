@@ -33,7 +33,7 @@ function finaliser(feuille, nbColonnes) {
  * Construit et télécharge le classeur.
  * @param {Array} mesures  lignes de la vue v_mesures_completes
  * @param {Array} historique  lignes de releve_historique (facultatif)
- * @param {Object} meta  { fermeNom, debut, fin }
+ * @param {Object} meta  { fermeNom, debut, fin, produit }
  */
 export async function exporterExcel(mesures, historique, meta) {
   const ExcelJS = (await import('exceljs')).default
@@ -288,6 +288,7 @@ export async function exporterExcel(mesures, historique, meta) {
   const nbReleves = new Set(mesures.map((m) => m.releve_id)).size
   ;[
     ['Exploitation', meta.fermeNom || '—'],
+    ['Produit', meta.produit || '—'],
     ['Période exportée', periode],
     ['Date de génération', horodatage(new Date().toISOString())],
     ['Nombre de relevés', nbReleves],
@@ -308,10 +309,17 @@ export async function exporterExcel(mesures, historique, meta) {
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })
-  const nomFichier = `suivi-frigo_${(meta.fermeNom || 'export')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')}_${meta.debut}_${meta.fin}.xlsx`
+  const tiret = (t) =>
+    (t || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+
+  // Le produit figure dans le nom : deux exports du même jour ne s'écrasent pas.
+  const nomFichier = `suivi-frigo_${tiret(meta.fermeNom) || 'export'}` +
+    `${meta.produit ? `_${tiret(meta.produit)}` : ''}_${meta.debut}_${meta.fin}.xlsx`
 
   const lien = document.createElement('a')
   lien.href = URL.createObjectURL(blob)
