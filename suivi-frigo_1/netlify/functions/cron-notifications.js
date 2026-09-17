@@ -60,6 +60,18 @@ export default async (request) => {
   const admin = clientAdmin()
   const journal = []
 
+  /* Référentiel des produits, chargé une fois pour toutes les exploitations. */
+  const { data: produits } = await admin
+    .from('produits')
+    .select('code, libelle, ordre')
+    .order('ordre')
+  const libelleProduit = (code) =>
+    (produits ?? []).find((p) => p.code === code)?.libelle ?? code
+  const rangProduit = (code) => {
+    const i = (produits ?? []).findIndex((p) => p.code === code)
+    return i === -1 ? 99 : i
+  }
+
   const { data: fermes, error } = await admin
     .from('fermes')
     .select('id, nom, code, timezone, rappel_matin, rappel_apresmidi, alerte_admin')
@@ -93,31 +105,62 @@ export default async (request) => {
       continue
     }
 
-    /* Un relevé validé aujourd'hui suffit à tout éteindre. */
-    const { count } = await admin
+    /* Produits réellement suivis ici : ceux qui ont au moins une chambre
+       froide active. Inutile de réclamer un relevé d'échalotes à une
+       exploitation qui n'en stocke pas. */
+    const { data: frigos } = await admin
+      .from('frigos')
+      .select('produit')
+      .eq('ferme_id', ferme.id)
+      .eq('actif', true)
+
+    const attendus = [...new Set((frigos ?? []).map((f) => f.produit || 'pdt'))]
+      .sort((a, b) => rangProduit(a) - rangProduit(b))
+
+    if (!attendus.length) {
+      journal.push({ ferme: ferme.code, heure: maintenant, action: 'aucun_frigo' })
+      continue
+    }
+
+    /* Chaque produit a son propre relevé : on regarde lesquels manquent. */
+    const { data: valides } = await admin
       .from('releves')
-      .select('id', { count: 'exact', head: true })
+      .select('produit')
       .eq('ferme_id', ferme.id)
       .eq('date_releve', jour)
       .eq('statut', 'valide')
 
-    if ((count ?? 0) > 0) {
+    const faits = new Set((valides ?? []).map((r) => r.produit || 'pdt'))
+    const manquants = attendus.filter((c) => !faits.has(c))
+
+    if (!manquants.length) {
       journal.push({ ferme: ferme.code, heure: maintenant, action: 'releve_deja_fait' })
       continue
     }
+
+    /* On ne nomme les produits que si l'exploitation en suit plusieurs :
+       ailleurs, le message reste celui d'avant. */
+    const liste = manquants.map((c) => libelleProduit(c).toLowerCase()).join(' et ')
+    const detaille = attendus.length > 1
+    const partiel = detaille && manquants.length < attendus.length
 
     /* ---------------- Rappel aux salariés ---------------- */
     if (estRappel) {
       const titre = maintenant === rappel1
         ? 'Relevé des températures'
         : 'Relevé toujours pas fait'
+      const quoi = detaille ? ` (${liste})` : ''
       const texte = maintenant === rappel1
-        ? `Bonjour ! C’est l’heure de relever les températures des frigos de ${ferme.nom}.`
-        : `Le relevé de ${ferme.nom} n’a pas encore été enregistré aujourd’hui.`
+        ? `Bonjour ! C’est l’heure de relever les températures des frigos de ${ferme.nom}${quoi}.`
+        : partiel
+          ? `Il manque encore le relevé ${liste} pour ${ferme.nom} aujourd’hui.`
+          : `Le relevé de ${ferme.nom} n’a pas encore été enregistré aujourd’hui${quoi}.`
       /* Version courte pour le SMS : un SMS standard tient en 160 caractères. */
       const texteSms = maintenant === rappel1
-        ? `SUIVI FRIGO — ${ferme.nom} : relevé des températures à faire aujourd’hui.`
-        : `SUIVI FRIGO — ${ferme.nom} : le relevé des températures n’est toujours pas fait.`
+        ? `SUIVI FRIGO — ${ferme.nom} : relevé des températures à faire aujourd’hui${quoi}.`
+        : partiel
+          ? `SUIVI FRIGO — ${ferme.nom} : il manque encore le relevé ${liste}.`
+          : `SUIVI FRIGO — ${ferme.nom} : le relevé des températures n’est toujours pas fait${quoi}.`
 
       const salaries = await destinataires(admin, ferme.id, ['salarie'])
 
@@ -135,18 +178,24 @@ export default async (request) => {
           tag: `rappel-${ferme.id}-${jour}-${maintenant}`,
         })
         const sms = await envoyerSms(salaries.map((s) => s.telephone), texteSms)
-        journal.push({ ferme: ferme.code, heure: maintenant, action: 'rappel', ...envoi, sms })
+        journal.push({ ferme: ferme.code, heure: maintenant, action: 'rappel', manquants, ...envoi, sms })
       }
     }
 
     /* ---------------- Alerte aux administrateurs ---------------- */
     if (estAlerte) {
-      const titre = `Relevé manquant — ${ferme.nom}`
-      const texte =
-        `Aucun relevé de température n’a été validé aujourd’hui (${jour.split('-').reverse().join('/')}) ` +
-        `pour ${ferme.nom}. Obligation de traçabilité non respectée.`
-      const texteSms =
-        `SUIVI FRIGO — ${ferme.nom} : aucun relevé validé aujourd’hui. Traçabilité non respectée.`
+      const dateFr = jour.split('-').reverse().join('/')
+      const titre = partiel
+        ? `Relevé incomplet — ${ferme.nom}`
+        : `Relevé manquant — ${ferme.nom}`
+      const texte = partiel
+        ? `Relevé incomplet aujourd’hui (${dateFr}) pour ${ferme.nom} : il manque ${liste}. ` +
+          `Obligation de traçabilité non respectée.`
+        : `Aucun relevé de température n’a été validé aujourd’hui (${dateFr}) ` +
+          `pour ${ferme.nom}${detaille ? ` (${liste})` : ''}. Obligation de traçabilité non respectée.`
+      const texteSms = partiel
+        ? `SUIVI FRIGO — ${ferme.nom} : relevé incomplet, il manque ${liste}. Traçabilité non respectée.`
+        : `SUIVI FRIGO — ${ferme.nom} : aucun relevé validé aujourd’hui. Traçabilité non respectée.`
 
       const admins = await destinataires(admin, ferme.id, ['admin', 'super_admin'])
 
@@ -164,7 +213,7 @@ export default async (request) => {
           tag: `manquant-${ferme.id}-${jour}`,
         })
         const sms = await envoyerSms(admins.map((a) => a.telephone), texteSms)
-        journal.push({ ferme: ferme.code, heure: maintenant, action: 'alerte_manquant', ...envoi, sms })
+        journal.push({ ferme: ferme.code, heure: maintenant, action: 'alerte_manquant', manquants, ...envoi, sms })
       }
     }
   }
