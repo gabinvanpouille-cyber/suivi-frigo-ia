@@ -7,10 +7,13 @@ import {
 } from '../lib/utils'
 import { Chargement, Message, Vide, Etiquette, Indicateur } from '../components/Ui'
 import { IcAlerte, IcCheck, IcCrayon, IcHistorique, IcThermo, IcCalendrier } from '../components/Icones'
+import Onglets from '../components/Onglets'
+import { useProduits, libelleProduit } from '../lib/produits'
 
 export default function AdminAccueil() {
   const { ferme } = useAuth()
   const location = useLocation()
+  const produits = useProduits()
 
   const [chargement, setChargement] = useState(true)
   const [erreur, setErreur] = useState('')
@@ -19,6 +22,7 @@ export default function AdminAccueil() {
   const [derniers, setDerniers] = useState([])
   const [modifs, setModifs] = useState([])
   const [manquants, setManquants] = useState([])
+  const [produit, setProduit] = useState('pdt')
 
   const jour = aujourdhui(ferme?.timezone)
   const debut30 = decalerJours(jour, -29)
@@ -33,12 +37,14 @@ export default function AdminAccueil() {
         .from('v_mesures_completes')
         .select('releve_id, date_releve, heure_releve, frigo_nom, temperature, seuil_min, seuil_max, conforme, auteur_nom, statut')
         .eq('ferme_id', ferme.id)
+        .eq('produit', produit)
         .gte('date_releve', debut30)
         .lte('date_releve', jour),
       supabase
         .from('releves')
         .select('id, date_releve, heure_releve, statut, nb_modifications, modifie_at, auteur_nom, auteur:profiles(identifiant, nom_complet), mesures(id, conforme)')
         .eq('ferme_id', ferme.id)
+        .eq('produit', produit)
         .order('date_releve', { ascending: false })
         .order('heure_releve', { ascending: false })
         .limit(8),
@@ -49,7 +55,7 @@ export default function AdminAccueil() {
         .eq('action', 'modification')
         .order('created_at', { ascending: false })
         .limit(6),
-      supabase.rpc('jours_sans_releve', { p_ferme: ferme.id, p_depuis: debut30, p_jusqu: jour }),
+      supabase.rpc('jours_sans_releve', { p_ferme: ferme.id, p_depuis: debut30, p_jusqu: jour, p_produit: produit }),
     ])
 
     if (rMesures.error) setErreur(rMesures.error.message)
@@ -58,7 +64,7 @@ export default function AdminAccueil() {
     setModifs(rModifs.data ?? [])
     setManquants((rManquants.data ?? []).map((r) => r.jour))
     setChargement(false)
-  }, [ferme, jour, debut30])
+  }, [ferme, jour, debut30, produit])
 
   useEffect(() => { charger() }, [charger])
 
@@ -76,11 +82,16 @@ export default function AdminAccueil() {
     <>
       <div className="entre" style={{ marginBottom: '.15rem' }}>
         <h1 className="mb0">Tableau de bord</h1>
-        <Link to="/admin/releves" className="petit">Voir tous les relevés</Link>
+        <Link to={`/releve/nouveau?produit=${produit}`} className="btn principal petit"
+              style={{ textDecoration: 'none' }}>
+          <IcThermo /> Faire le relevé
+        </Link>
       </div>
       <p className="muet petit" style={{ textTransform: 'capitalize' }}>
         {ferme?.nom} · {dateLongue(jour)}
       </p>
+
+      <Onglets options={produits} valeur={produit} onChange={setProduit} aria="Produit" />
 
       <Message type="ok" onFermer={() => setMessage('')}>{message}</Message>
       <Message type="ko" onFermer={() => setErreur('')}>{erreur}</Message>
@@ -118,7 +129,8 @@ export default function AdminAccueil() {
       {/* ---------------- Alerte du jour ---------------- */}
       {!releveFait && (
         <Message type="att">
-          Aucun relevé validé aujourd’hui. Une alerte partira automatiquement à{' '}
+          Aucun relevé {libelleProduit(produits, produit).toLowerCase()} validé aujourd’hui.
+          Une alerte partira automatiquement à{' '}
           <strong>{heureCourte(ferme?.alerte_admin)}</strong> si la situation n’évolue pas.
         </Message>
       )}
