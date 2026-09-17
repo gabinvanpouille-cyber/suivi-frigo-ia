@@ -6,6 +6,7 @@ import {
   creerFerme, supprimerFerme,
 } from '../lib/api'
 import { demiHeures, heureCourte, dateFR } from '../lib/utils'
+import { useProduits, libelleProduit } from '../lib/produits'
 import { Chargement, Message, Vide, Etiquette, Dialogue } from '../components/Ui'
 import {
   IcFrigo, IcUtilisateurs, IcFermeBatiment, IcPlus, IcCrayon, IcPoubelle,
@@ -64,13 +65,14 @@ export default function AdminGestion() {
 /* ===================================================================== */
 /*  Onglet 1 — Frigos                                                    */
 /* ===================================================================== */
-const FRIGO_VIDE = { nom: '', emplacement: '', temp_min: '0', temp_max: '4', ordre: 0, actif: true }
+const FRIGO_VIDE = { nom: '', emplacement: '', produit: 'pdt', temp_min: '0', temp_max: '4', ordre: 0, actif: true }
 
 function OngletFrigos({ ferme, setMsg }) {
   const [liste, setListe] = useState([])
   const [chargement, setChargement] = useState(true)
   const [edition, setEdition] = useState(null)
   const [occupe, setOccupe] = useState(false)
+  const produits = useProduits()
 
   const charger = useCallback(async () => {
     if (!ferme) return
@@ -106,6 +108,7 @@ function OngletFrigos({ ferme, setMsg }) {
       ferme_id: ferme.id,
       nom: edition.nom.trim(),
       emplacement: edition.emplacement?.trim() || null,
+      produit: edition.produit || 'pdt',
       temp_min: min,
       temp_max: max,
       ordre: Number(edition.ordre) || 0,
@@ -156,7 +159,7 @@ function OngletFrigos({ ferme, setMsg }) {
             <table>
               <thead>
                 <tr>
-                  <th>Ordre</th><th>Nom</th><th>Emplacement</th>
+                  <th>Ordre</th><th>Nom</th><th>Produit</th><th>Emplacement</th>
                   <th>Seuil min</th><th>Seuil max</th><th>État</th><th></th>
                 </tr>
               </thead>
@@ -165,6 +168,7 @@ function OngletFrigos({ ferme, setMsg }) {
                   <tr key={f.id} style={{ opacity: f.actif ? 1 : 0.55 }}>
                     <td className="num muet">{f.ordre}</td>
                     <td className="gras">{f.nom}</td>
+                    <td className="tres-petit">{libelleProduit(produits, f.produit)}</td>
                     <td className="tres-petit muet">{f.emplacement || '—'}</td>
                     <td className="num">{Number(f.temp_min).toFixed(1)} °C</td>
                     <td className="num">{Number(f.temp_max).toFixed(1)} °C</td>
@@ -203,11 +207,22 @@ function OngletFrigos({ ferme, setMsg }) {
                      onChange={(e) => setEdition({ ...edition, nom: e.target.value })}
                      placeholder="Chambre froide positive" />
             </div>
-            <div className="champ">
-              <label htmlFor="fe">Emplacement</label>
-              <input id="fe" type="text" value={edition.emplacement ?? ''}
-                     onChange={(e) => setEdition({ ...edition, emplacement: e.target.value })}
-                     placeholder="Laiterie" />
+            <div className="grille k2">
+              <div className="champ">
+                <label htmlFor="fe">Emplacement</label>
+                <input id="fe" type="text" value={edition.emplacement ?? ''}
+                       onChange={(e) => setEdition({ ...edition, emplacement: e.target.value })}
+                       placeholder="Laiterie" />
+              </div>
+              <div className="champ">
+                <label htmlFor="fp">Produit *</label>
+                <select id="fp" value={edition.produit ?? 'pdt'}
+                        onChange={(e) => setEdition({ ...edition, produit: e.target.value })}>
+                  {produits.map((pr) => (
+                    <option key={pr.code} value={pr.code}>{pr.libelle}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="grille k2">
               <div className="champ">
