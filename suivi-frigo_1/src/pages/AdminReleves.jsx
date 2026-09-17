@@ -12,6 +12,8 @@ import { Chargement, Message, Vide, Etiquette, Dialogue, Indicateur } from '../c
 import {
   IcTelecharger, IcHistorique, IcCrayon, IcPoubelle, IcAlerte, IcCheck, IcPhoto,
 } from '../components/Icones'
+import Onglets from '../components/Onglets'
+import { useProduits, libelleProduit } from '../lib/produits'
 
 const RACCOURCIS = [
   { libelle: '7 j', jours: 7 },
@@ -24,10 +26,12 @@ export default function AdminReleves() {
   const { ferme, estAdmin } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const produits = useProduits()
 
   const finDefaut = aujourdhui(ferme?.timezone)
   const [debut, setDebut] = useState(decalerJours(finDefaut, -29))
   const [fin, setFin] = useState(finDefaut)
+  const [produit, setProduit] = useState('pdt')
   const [filtreFrigo, setFiltreFrigo] = useState('')
   const [filtreConf, setFiltreConf] = useState('')
   const [filtreAuteur, setFiltreAuteur] = useState('')
@@ -49,18 +53,20 @@ export default function AdminReleves() {
         .from('v_mesures_completes')
         .select('*')
         .eq('ferme_id', ferme.id)
+        .eq('produit', produit)
         .gte('date_releve', debut)
         .lte('date_releve', fin)
         .order('date_releve', { ascending: false })
         .order('heure_releve', { ascending: false }),
-      supabase.from('frigos').select('id, nom').eq('ferme_id', ferme.id).order('ordre'),
+      supabase.from('frigos').select('id, nom').eq('ferme_id', ferme.id)
+        .eq('produit', produit).order('ordre'),
     ])
 
     if (rMesures.error) setErreur(rMesures.error.message)
     setMesures(rMesures.data ?? [])
     setFrigos(rFrigos.data ?? [])
     setChargement(false)
-  }, [ferme, debut, fin])
+  }, [ferme, debut, fin, produit])
 
   useEffect(() => { charger() }, [charger])
 
@@ -81,6 +87,12 @@ export default function AdminReleves() {
       .filter(([k]) => k),
     [mesures]
   )
+
+  /* Changer de produit remet à zéro le filtre frigo, qui ne vaut que pour l'autre. */
+  const changerProduit = (code) => {
+    setFiltreFrigo('')
+    setProduit(code)
+  }
 
   const appliquerRaccourci = (jours) => {
     const f = aujourdhui(ferme?.timezone)
@@ -109,6 +121,7 @@ export default function AdminReleves() {
 
       const nom = await exporterExcel(filtrees, histoAplati, {
         fermeNom: ferme.nom, debut, fin,
+        produit: libelleProduit(produits, produit),
       })
       setMessage(`Export généré : ${nom}`)
     } catch (e) {
@@ -162,6 +175,8 @@ export default function AdminReleves() {
 
       <Message type="ok" onFermer={() => setMessage('')}>{message}</Message>
       <Message type="ko" onFermer={() => setErreur('')}>{erreur}</Message>
+
+      <Onglets options={produits} valeur={produit} onChange={changerProduit} aria="Produit" />
 
       {/* ---------------- Filtres ---------------- */}
       <div className="carte">
