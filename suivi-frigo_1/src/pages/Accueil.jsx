@@ -6,9 +6,11 @@ import { aujourdhui, dateLongue, heureCourte, temp, ecart, depuis } from '../lib
 import { Chargement, Message, Vide, Etiquette } from '../components/Ui'
 import { IcThermo, IcCheck, IcAlerte, IcCrayon, IcCloche, IcFrigo } from '../components/Icones'
 import { abonnementActif, pushDisponible } from '../lib/push'
+import { useProduits, libelleProduit } from '../lib/produits'
 
 export default function Accueil() {
   const { profil, ferme } = useAuth()
+  const produits = useProduits()
   const [releves, setReleves] = useState([])
   const [frigos, setFrigos] = useState([])
   const [chargement, setChargement] = useState(true)
@@ -25,17 +27,17 @@ export default function Accueil() {
       supabase
         .from('releves')
         .select(
-          'id, date_releve, heure_releve, statut, remarque, nb_modifications, modifie_at, auteur_id, auteur_nom,' +
+          'id, date_releve, heure_releve, statut, remarque, nb_modifications, modifie_at, auteur_id, auteur_nom, produit,' +
           ' auteur:profiles(identifiant, nom_complet),' +
           ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque, photo_url,' +
-          ' frigo:frigos(id, nom, emplacement))'
+          ' frigo:frigos(id, nom, emplacement, produit))'
         )
         .eq('ferme_id', ferme.id)
         .eq('date_releve', jour)
         .order('heure_releve', { ascending: false }),
       supabase
         .from('frigos')
-        .select('id, nom')
+        .select('id, nom, produit')
         .eq('ferme_id', ferme.id)
         .eq('actif', true),
     ])
@@ -55,11 +57,14 @@ export default function Accueil() {
 
   if (chargement) return <Chargement />
 
-  const valides = releves.filter((r) => r.statut === 'valide')
   const brouillons = releves.filter((r) => r.statut === 'brouillon')
   const toutesMesures = releves.flatMap((r) => r.mesures ?? [])
   const alertes = toutesMesures.filter((m) => m.conforme === false)
-  const faitAujourdhui = valides.length > 0
+
+  // Un relevé par produit : chaque produit a son propre état du jour.
+  const listeProduits = produits.length ? produits : [{ code: 'pdt', libelle: 'Pommes de terre' }]
+  const plusieursProduits = listeProduits.length > 1
+  const duProduit = (code) => releves.filter((r) => (r.produit ?? 'pdt') === code)
 
   return (
     <>
@@ -75,46 +80,61 @@ export default function Accueil() {
         </Message>
       )}
 
-      {/* ---- État du jour ---- */}
-      <div
-        className="carte"
-        style={{
-          borderColor: faitAujourdhui ? 'var(--vert)' : 'var(--ambre)',
-          background: faitAujourdhui ? 'var(--vert-fond)' : 'var(--ambre-fond)',
-        }}
-      >
-        <div className="rangee" style={{ gap: '.7rem', flexWrap: 'nowrap' }}>
+      {/* ---- État du jour : un bloc par produit ---- */}
+      {listeProduits.map((pr) => {
+        const rel = duProduit(pr.code)
+        const valides = rel.filter((r) => r.statut === 'valide')
+        const nbFrigos = frigos.filter((f) => (f.produit ?? 'pdt') === pr.code).length
+        const fait = valides.length > 0
+        return (
           <div
+            key={pr.code}
+            className="carte"
             style={{
-              width: 44, height: 44, borderRadius: 12, flex: 'none',
-              display: 'grid', placeItems: 'center',
-              background: faitAujourdhui ? 'var(--vert)' : 'var(--ambre)', color: '#fff',
+              borderColor: fait ? 'var(--vert)' : 'var(--ambre)',
+              background: fait ? 'var(--vert-fond)' : 'var(--ambre-fond)',
             }}
           >
-            {faitAujourdhui ? <IcCheck style={{ width: 24, height: 24 }} /> : <IcAlerte style={{ width: 24, height: 24 }} />}
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <strong style={{ color: faitAujourdhui ? 'var(--vert)' : 'var(--ambre)' }}>
-              {faitAujourdhui ? 'Relevé du jour effectué' : 'Relevé du jour à faire'}
-            </strong>
-            <div className="petit doux">
-              {faitAujourdhui
-                ? `${valides.length} relevé${valides.length > 1 ? 's' : ''} validé${valides.length > 1 ? 's' : ''} aujourd’hui`
-                : 'Aucun relevé validé pour aujourd’hui.'}
+            <div className="rangee" style={{ gap: '.7rem', flexWrap: 'nowrap' }}>
+              <div
+                style={{
+                  width: 44, height: 44, borderRadius: 12, flex: 'none',
+                  display: 'grid', placeItems: 'center',
+                  background: fait ? 'var(--vert)' : 'var(--ambre)', color: '#fff',
+                }}
+              >
+                {fait ? <IcCheck style={{ width: 24, height: 24 }} /> : <IcAlerte style={{ width: 24, height: 24 }} />}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <strong style={{ color: fait ? 'var(--vert)' : 'var(--ambre)' }}>
+                  {plusieursProduits
+                    ? `${pr.libelle} · ${fait ? 'relevé effectué' : 'relevé à faire'}`
+                    : fait ? 'Relevé du jour effectué' : 'Relevé du jour à faire'}
+                </strong>
+                <div className="petit doux">
+                  {!nbFrigos
+                    ? 'Aucune chambre froide enregistrée pour ce produit.'
+                    : fait
+                    ? `${valides.length} relevé${valides.length > 1 ? 's' : ''} validé${valides.length > 1 ? 's' : ''} aujourd’hui`
+                    : 'Aucun relevé validé pour aujourd’hui.'}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        <Link
-          to="/releve/nouveau"
-          className="btn principal large mt"
-          style={{ textDecoration: 'none' }}
-          aria-disabled={!frigos.length}
-        >
-          <IcThermo />
-          {faitAujourdhui ? 'Ajouter un relevé' : 'Faire le relevé'}
-        </Link>
-      </div>
+            {nbFrigos > 0 && (
+              <Link
+                to={`/releve/nouveau?produit=${pr.code}`}
+                className="btn principal large mt"
+                style={{ textDecoration: 'none' }}
+              >
+                <IcThermo />
+                {fait ? 'Ajouter un relevé' : 'Faire le relevé'}
+                {plusieursProduits ? ` — ${pr.libelle.toLowerCase()}` : ''}
+              </Link>
+            )}
+          </div>
+        )
+      })}
 
       {/* ---- Alertes de dépassement ---- */}
       {alertes.length > 0 && (
@@ -132,6 +152,9 @@ export default function Accueil() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <strong>{m.frigo?.nom}</strong>{' '}
                   <span className="gras" style={{ color: 'var(--rouge)' }}>{temp(m.temperature)}</span>
+                  {plusieursProduits && (
+                    <span className="tres-petit muet">{' · '}{libelleProduit(listeProduits, m.frigo?.produit)}</span>
+                  )}
                   <div className="tres-petit muet">
                     {ecart(m.temperature, m.seuil_min, m.seuil_max)} — seuils {temp(m.seuil_min)} à {temp(m.seuil_max)}
                   </div>
@@ -147,7 +170,10 @@ export default function Accueil() {
         <Message type="att">
           Vous avez {brouillons.length} relevé{brouillons.length > 1 ? 's' : ''} non validé
           {brouillons.length > 1 ? 's' : ''}.{' '}
-          <Link to={`/releve/${brouillons[0].id}`}>Reprendre la saisie</Link>
+          <Link to={`/releve/${brouillons[0].id}`}>
+            Reprendre la saisie
+            {plusieursProduits ? ` (${libelleProduit(listeProduits, brouillons[0].produit).toLowerCase()})` : ''}
+          </Link>
         </Message>
       )}
 
@@ -185,6 +211,9 @@ export default function Accueil() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="rangee" style={{ gap: '.35rem' }}>
+                      {plusieursProduits && (
+                        <Etiquette type="info">{libelleProduit(listeProduits, r.produit)}</Etiquette>
+                      )}
                       {r.statut === 'valide'
                         ? <Etiquette type="ok">Validé</Etiquette>
                         : <Etiquette type="att">Brouillon</Etiquette>}
