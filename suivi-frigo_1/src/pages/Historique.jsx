@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase'
 import { aujourdhui, decalerJours, dateLongue, heureCourte, temp, depuis } from '../lib/utils'
 import { Chargement, Message, Vide, Etiquette } from '../components/Ui'
 import { IcCrayon, IcHistorique, IcChevron } from '../components/Icones'
+import Onglets from '../components/Onglets'
+import { useProduits } from '../lib/produits'
 
 const PERIODES = [
   { valeur: 7, libelle: '7 jours' },
@@ -15,7 +17,9 @@ const PERIODES = [
 export default function Historique() {
   const { profil, ferme } = useAuth()
   const location = useLocation()
+  const produits = useProduits()
 
+  const [produit, setProduit] = useState('pdt')
   const [jours, setJours] = useState(30)
   const [seulementMoi, setSeulementMoi] = useState(false)
   const [releves, setReleves] = useState([])
@@ -34,11 +38,12 @@ export default function Historique() {
     let requete = supabase
       .from('releves')
       .select(
-        'id, date_releve, heure_releve, statut, remarque, nb_modifications, modifie_at, auteur_id, auteur_nom,' +
+        'id, date_releve, heure_releve, statut, remarque, nb_modifications, modifie_at, auteur_id, auteur_nom, produit,' +
         ' auteur:profiles(identifiant, nom_complet),' +
         ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque, frigo:frigos(nom))'
       )
       .eq('ferme_id', ferme.id)
+      .eq('produit', produit)
       .gte('date_releve', debut)
       .lte('date_releve', fin)
       .order('date_releve', { ascending: false })
@@ -50,7 +55,7 @@ export default function Historique() {
     if (error) setErreur(error.message)
     setReleves(data ?? [])
     setChargement(false)
-  }, [ferme, jours, seulementMoi, profil])
+  }, [ferme, jours, seulementMoi, profil, produit])
 
   useEffect(() => { charger() }, [charger])
 
@@ -62,6 +67,8 @@ export default function Historique() {
   return (
     <>
       <h1>Historique</h1>
+
+      <Onglets options={produits} valeur={produit} onChange={setProduit} aria="Produit" />
 
       <Message type="ok" onFermer={() => setMessage('')}>{message}</Message>
       <Message type="ko" onFermer={() => setErreur('')}>{erreur}</Message>
