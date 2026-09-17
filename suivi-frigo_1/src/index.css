@@ -331,3 +331,32 @@ td.num { font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowr
   .contenu { padding: 0; max-width: none; }
   .carte { box-shadow: none; border-color: #ccc; break-inside: avoid; }
 }
+
+/* ---------------------------------------------------------------------
+   Onglets produits (pommes de terre / échalotes)
+   --------------------------------------------------------------------- */
+.onglets {
+  display: flex; gap: .25rem; padding: .25rem; margin-bottom: .8rem;
+  background: var(--surface-2);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r);
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+.onglets button {
+  flex: 1 1 0; min-width: max-content;
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+  padding: .6rem .85rem; border: none; border-radius: var(--r-s);
+  background: transparent; color: var(--texte-doux);
+  font: inherit; font-size: .9rem; font-weight: 600;
+  white-space: nowrap; cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.onglets button:hover:not(.actif) { color: var(--texte); }
+.onglets button.actif { background: var(--surface); color: var(--bleu); box-shadow: var(--ombre); }
+.onglets .pastille {
+  font-size: .68rem; font-weight: 700; line-height: 1;
+  padding: .22rem .42rem; border-radius: 99px;
+  background: var(--bordure); color: var(--texte-doux);
+}
+.onglets button.actif .pastille { background: var(--bleu); color: #fff; }
+@media print { .onglets { display: none !important; } }
