@@ -12,6 +12,8 @@ import {
 } from '../lib/utils'
 import { Chargement, Message, Vide, Etiquette } from '../components/Ui'
 import { IcCourbe, IcAlerte } from '../components/Icones'
+import Onglets from '../components/Onglets'
+import { useProduits } from '../lib/produits'
 
 const RACCOURCIS = [
   { libelle: '7 j', jours: 7 },
@@ -21,6 +23,7 @@ const RACCOURCIS = [
 
 export default function AdminCourbes() {
   const { ferme } = useAuth()
+  const produits = useProduits()
   const sombre = useThemeSombre()
   const t = jetons(sombre)
   const etat = sombre ? ETAT.sombre : ETAT.clair
@@ -28,6 +31,7 @@ export default function AdminCourbes() {
   const finDefaut = aujourdhui(ferme?.timezone)
   const [debut, setDebut] = useState(decalerJours(finDefaut, -29))
   const [fin, setFin] = useState(finDefaut)
+  const [produit, setProduit] = useState('pdt')
   const [selection, setSelection] = useState([])   // ids de frigos affichés
   const [frigos, setFrigos] = useState([])
   const [mesures, setMesures] = useState([])
@@ -43,11 +47,13 @@ export default function AdminCourbes() {
         .from('frigos')
         .select('id, nom, emplacement, temp_min, temp_max, actif, ordre')
         .eq('ferme_id', ferme.id)
+        .eq('produit', produit)
         .order('ordre'),
       supabase
         .from('v_mesures_completes')
         .select('releve_id, frigo_id, frigo_nom, date_releve, heure_releve, temperature, seuil_min, seuil_max, conforme')
         .eq('ferme_id', ferme.id)
+        .eq('produit', produit)
         .eq('statut', 'valide')
         .gte('date_releve', debut)
         .lte('date_releve', fin)
@@ -63,7 +69,7 @@ export default function AdminCourbes() {
       s.length ? s : listeFrigos.filter((f) => f.actif).slice(0, MAX_SERIES).map((f) => f.id)
     )
     setChargement(false)
-  }, [ferme, debut, fin])
+  }, [ferme, debut, fin, produit])
 
   useEffect(() => { charger() }, [charger])
 
@@ -130,6 +136,12 @@ export default function AdminCourbes() {
       return [...s, id]
     })
 
+  /* Les courbes sélectionnées appartiennent à un produit : on repart de zéro. */
+  const changerProduit = (code) => {
+    setSelection([])
+    setProduit(code)
+  }
+
   const appliquerRaccourci = (jours) => {
     const f = aujourdhui(ferme?.timezone)
     setFin(f)
@@ -187,6 +199,8 @@ export default function AdminCourbes() {
       </p>
 
       <Message type="ko" onFermer={() => setErreur('')}>{erreur}</Message>
+
+      <Onglets options={produits} valeur={produit} onChange={changerProduit} aria="Produit" />
 
       {/* ---------------- Filtres ---------------- */}
       <div className="carte">
