@@ -50,7 +50,7 @@ export default gerer(async (request) => {
   const { data: releve, error } = await admin
     .from('releves')
     .select(
-      'id, ferme_id, date_releve, heure_releve, statut, remarque, nb_modifications, auteur_nom,' +
+      'id, ferme_id, date_releve, heure_releve, statut, remarque, nb_modifications, auteur_nom, produit,' +
       ' ferme:fermes(id, nom, code),' +
       ' auteur:profiles(identifiant, nom_complet),' +
       ' mesures(temperature, seuil_min, seuil_max, conforme, remarque, frigo:frigos(nom, emplacement))'
@@ -63,6 +63,15 @@ export default gerer(async (request) => {
     return erreur('Ce relevé appartient à une autre exploitation.', 403)
   }
 
+  /* Libellé du produit relevé : un relevé ne porte que sur un seul produit. */
+  const { data: fiche } = await admin
+    .from('produits')
+    .select('libelle')
+    .eq('code', releve.produit ?? 'pdt')
+    .maybeSingle()
+  const produit = (fiche?.libelle || '').toLowerCase()
+  const mention = produit ? ` (${produit})` : ''
+
   const auteur = releve.auteur?.nom_complet || releve.auteur?.identifiant || releve.auteur_nom || 'un salarié'
   const quand = `${dateFR(releve.date_releve)} à ${String(releve.heure_releve).slice(0, 5)}`
   const mesures = releve.mesures ?? []
@@ -74,7 +83,7 @@ export default gerer(async (request) => {
     return `${marque} ${m.frigo?.nom} : ${formaterTemp(m.temperature)}`
   })
   const recapCorps =
-    `${releve.ferme?.nom} — relevé du ${quand} par ${auteur}\n` +
+    `${releve.ferme?.nom} — relevé du ${quand} par ${auteur}${mention}\n` +
     lignes.join('\n') +
     (releve.remarque ? `\nRemarque : ${releve.remarque}` : '')
 
@@ -109,7 +118,8 @@ export default gerer(async (request) => {
       .join('\n')
 
     const titreAlerte = `ALERTE température — ${releve.ferme?.nom}`
-    const corpsAlerte = `${horsSeuils.length} frigo(s) hors seuils, relevé du ${quand} :\n${detail}`
+    const corpsAlerte =
+      `${horsSeuils.length} frigo(s) hors seuils, relevé du ${quand}${mention} :\n${detail}`
 
     await journaliser(admin, releve.ferme_id, tous.map((p) => p.id), {
       type: 'alerte_temp',
