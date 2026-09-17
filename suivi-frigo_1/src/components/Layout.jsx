@@ -16,6 +16,9 @@ const LIENS_SALARIE = [
 
 const LIENS_ADMIN = [
   { to: '/admin', libelle: 'Tableau', Icone: IcAccueil, exact: true },
+  // Un administrateur releve les temperatures comme tout le monde : sans ce
+  // lien, la saisie n'etait accessible qu'en tapant l'adresse a la main.
+  { to: '/releve/nouveau', libelle: 'Saisie', Icone: IcThermo },
   { to: '/admin/releves', libelle: 'Relevés', Icone: IcHistorique },
   { to: '/admin/courbes', libelle: 'Courbes', Icone: IcCourbe },
   { to: '/admin/gestion', libelle: 'Gestion', Icone: IcFrigo },
