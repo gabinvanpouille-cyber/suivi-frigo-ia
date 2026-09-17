@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { envoyerPhoto, urlsPhotos } from '../lib/photos'
@@ -9,11 +9,15 @@ import {
 } from '../lib/utils'
 import { Chargement, Message, Etiquette, Dialogue } from '../components/Ui'
 import { IcCheck, IcPhoto, IcCroix, IcAlerte, IcRetour, IcThermo } from '../components/Icones'
+import Onglets from '../components/Onglets'
+import { useProduits, libelleProduit } from '../lib/produits'
 
 export default function ReleveForm() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const { profil, ferme, estAdmin } = useAuth()
+  const produits = useProduits()
 
   const [chargement, setChargement] = useState(true)
   const [erreur, setErreur] = useState('')
@@ -29,8 +33,16 @@ export default function ReleveForm() {
   const [remarque, setRemarque] = useState('')
   const [lignes, setLignes] = useState([])
   const [urls, setUrls] = useState({})
+  const [produit, setProduit] = useState(params.get('produit') || 'pdt')
 
   const auteurOrigine = useRef(null)
+  // Saisies conservees lorsqu'on bascule d'un onglet produit a l'autre.
+  const brouillonLocal = useRef({})
+  const remarquesLocales = useRef({})
+
+  // En modification, le produit vient du releve lui-meme : il ne doit pas
+  // relancer le chargement, d'ou le null.
+  const produitDemande = id ? null : produit
 
   /* ------------------------------ chargement ------------------------------ */
   const charger = useCallback(async () => {
@@ -38,10 +50,38 @@ export default function ReleveForm() {
     setChargement(true)
     setErreur('')
 
+    /* 1. Un relevé porte un seul produit : en modification, c'est lui qui fixe
+          l'onglet, pas l'inverse. */
+    let prod = produitDemande ?? 'pdt'
+    let releve = null
+
+    if (id) {
+      const { data, error: eReleve } = await supabase
+        .from('releves')
+        .select(
+          'id, date_releve, heure_releve, statut, remarque, nb_modifications, auteur_id, produit,' +
+          ' mesures(id, frigo_id, temperature, seuil_min, seuil_max, remarque, photo_url,' +
+          ' frigo:frigos(id, nom, emplacement, temp_min, temp_max, ordre))'
+        )
+        .eq('id', id)
+        .maybeSingle()
+
+      if (eReleve || !data) {
+        setErreur('Relevé introuvable ou inaccessible.')
+        setChargement(false)
+        return
+      }
+      releve = data
+      prod = releve.produit ?? 'pdt'
+      setProduit(prod)
+    }
+
+    /* 2. Les chambres froides de ce produit uniquement. */
     const { data: frigos, error: eFrigos } = await supabase
       .from('frigos')
       .select('id, nom, emplacement, temp_min, temp_max, ordre')
       .eq('ferme_id', ferme.id)
+      .eq('produit', prod)
       .eq('actif', true)
       .order('ordre')
       .order('nom')
@@ -52,29 +92,18 @@ export default function ReleveForm() {
       return
     }
 
+    /* 3. Nouveau relevé : lignes vierges, ou saisies déjà faites si l'on
+          revient sur un onglet commencé. */
     if (!id) {
+      const conserve = brouillonLocal.current[prod]
       setLignes(
-        (frigos ?? []).map((f) => ({
-          frigo: f, mesureId: null, temperature: '', remarqueMesure: '',
-          photoChemin: null, fichier: null,
-        }))
+        conserve ??
+          (frigos ?? []).map((f) => ({
+            frigo: f, mesureId: null, temperature: '', remarqueMesure: '',
+            photoChemin: null, fichier: null,
+          }))
       )
-      setChargement(false)
-      return
-    }
-
-    const { data: releve, error: eReleve } = await supabase
-      .from('releves')
-      .select(
-        'id, date_releve, heure_releve, statut, remarque, nb_modifications, auteur_id,' +
-        ' mesures(id, frigo_id, temperature, seuil_min, seuil_max, remarque, photo_url,' +
-        ' frigo:frigos(id, nom, emplacement, temp_min, temp_max, ordre))'
-      )
-      .eq('id', id)
-      .maybeSingle()
-
-    if (eReleve || !releve) {
-      setErreur('Relevé introuvable ou inaccessible.')
+      setRemarque(remarquesLocales.current[prod] ?? '')
       setChargement(false)
       return
     }
@@ -114,9 +143,17 @@ export default function ReleveForm() {
     setLignes(nouvelles)
     setUrls(await urlsPhotos(nouvelles.map((l) => l.photoChemin)))
     setChargement(false)
-  }, [ferme, id])
+  }, [ferme, id, produitDemande])
 
   useEffect(() => { charger() }, [charger])
+
+  /* Bascule d'onglet : on mémorise ce qui a déjà été saisi pour y revenir. */
+  const changerProduit = (code) => {
+    brouillonLocal.current[produit] = lignes
+    remarquesLocales.current[produit] = remarque
+    setErreur('')
+    setProduit(code)
+  }
 
   /* ------------------------------ édition -------------------------------- */
   const majLigne = (frigoId, champs) =>
@@ -191,6 +228,7 @@ export default function ReleveForm() {
           .insert({
             ferme_id: ferme.id,
             auteur_id: profil.id,
+            produit,
             date_releve: dateReleve,
             heure_releve: `${heure}:00`,
             remarque: remarque || null,
@@ -273,6 +311,9 @@ export default function ReleveForm() {
         await notifierReleve(idCourant, etaitValide ? 'modification' : 'validation')
       }
 
+      delete brouillonLocal.current[produit]
+      delete remarquesLocales.current[produit]
+
       navigate(estAdmin ? '/admin/releves' : '/', {
         replace: true,
         state: {
@@ -304,7 +345,26 @@ export default function ReleveForm() {
       <h1 style={{ marginBottom: '.15rem' }}>
         {enModification ? 'Modifier le relevé' : id ? 'Reprendre le relevé' : 'Nouveau relevé'}
       </h1>
-      <p className="muet petit" style={{ textTransform: 'capitalize' }}>{dateLongue(dateReleve)}</p>
+      <p className="muet petit" style={{ textTransform: 'capitalize' }}>
+        {dateLongue(dateReleve)}
+        {id && produits.length > 1 && (
+          <>
+            {' · '}
+            <span className="gras" style={{ textTransform: 'none' }}>
+              {libelleProduit(produits, produit)}
+            </span>
+          </>
+        )}
+      </p>
+
+      {!id && (
+        <Onglets
+          options={produits}
+          valeur={produit}
+          onChange={changerProduit}
+          aria="Produit du relevé"
+        />
+      )}
 
       <Message type="ko" onFermer={() => setErreur('')}>{erreur}</Message>
 
@@ -318,8 +378,9 @@ export default function ReleveForm() {
 
       {!lignes.length && (
         <Message type="ko">
-          Aucun frigo actif dans cette exploitation.{' '}
-          {estAdmin ? <Link to="/admin/gestion">En créer un</Link> : 'Contactez votre administrateur.'}
+          Aucune chambre froide active en{' '}
+          {libelleProduit(produits, produit).toLowerCase()} dans cette exploitation.{' '}
+          {estAdmin ? <Link to="/admin/gestion">En créer une</Link> : 'Contactez votre administrateur.'}
         </Message>
       )}
 
