@@ -56,6 +56,7 @@ export async function exporterExcel(mesures, historique, meta) {
     { header: 'Seuil min', key: 'min', width: 10 },
     { header: 'Seuil max', key: 'max', width: 10 },
     { header: 'Conformité', key: 'conf', width: 14 },
+    { header: 'En descente', key: 'descente', width: 12 },
     { header: 'Écart (°C)', key: 'ecart', width: 11 },
     { header: 'Hygrométrie (%)', key: 'hygro', width: 15 },
     { header: 'HR min', key: 'hmin', width: 9 },
@@ -84,8 +85,9 @@ export async function exporterExcel(mesures, historique, meta) {
       temp: t,
       min: Number(m.seuil_min),
       max: Number(m.seuil_max),
-      conf: m.conforme ? 'Conforme' : 'NON CONFORME',
-      ecart: e,
+      conf: m.en_descente ? 'En descente' : m.conforme ? 'Conforme' : 'NON CONFORME',
+      descente: m.en_descente ? 'Oui' : '',
+      ecart: m.en_descente ? null : e,
       hygro: m.hygrometrie === null || m.hygrometrie === undefined ? null : Number(m.hygrometrie),
       hmin: m.seuil_hygro_min === null || m.seuil_hygro_min === undefined ? null : Number(m.seuil_hygro_min),
       hmax: m.seuil_hygro_max === null || m.seuil_hygro_max === undefined ? null : Number(m.seuil_hygro_max),
@@ -116,7 +118,12 @@ export async function exporterExcel(mesures, historique, meta) {
       })
     }
 
-    if (!m.conforme) {
+    if (m.en_descente) {
+      // Mise en froid : signalée en bleu, jamais comptée comme un dépassement.
+      ;['temp', 'conf', 'descente'].forEach((k) => {
+        ligne.getCell(k).font = { bold: true, color: { argb: 'FF0369A1' } }
+      })
+    } else if (m.conforme === false) {
       ;['temp', 'conf', 'ecart'].forEach((k) => {
         ligne.getCell(k).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ROUGE_FOND } }
         ligne.getCell(k).font = { bold: true, color: { argb: ROUGE_TEXTE } }
