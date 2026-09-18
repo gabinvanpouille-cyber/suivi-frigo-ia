@@ -10,6 +10,7 @@ import {
 const LIENS_SALARIE = [
   { to: '/', libelle: 'Accueil', Icone: IcAccueil, exact: true },
   { to: '/releve/nouveau', libelle: 'Relevé', Icone: IcThermo },
+  { to: '/courbes', libelle: 'Courbes', Icone: IcCourbe },
   { to: '/historique', libelle: 'Historique', Icone: IcHistorique },
   { to: '/reglages', libelle: 'Réglages', Icone: IcReglages },
 ]
