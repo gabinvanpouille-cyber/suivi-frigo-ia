@@ -13,6 +13,8 @@ export function FournisseurAuth({ children }) {
   const [session, setSession] = useState(null)
   const [profil, setProfil] = useState(null)
   const [chargement, setChargement] = useState(true)
+  const [fermes, setFermes] = useState([])       // toutes les exploitations (siège seulement)
+  const [fermeVueId, setFermeVueId] = useState(null)
   const montee = useRef(true)
 
   const chargerProfil = useCallback(async (userId) => {
@@ -57,6 +59,28 @@ export function FournisseurAuth({ children }) {
       sub.subscription.unsubscribe()
     }
   }, [chargerProfil])
+
+  /* Le siège — l'administrateur général — peut consulter les autres
+     exploitations. Personne d'autre ne charge cette liste, et les règles de
+     la base la refuseraient de toute façon. */
+  useEffect(() => {
+    if (profil?.role !== 'super_admin') {
+      setFermes([])
+      setFermeVueId(null)
+      return
+    }
+    let vivant = true
+    supabase
+      .from('fermes')
+      .select('*')
+      .eq('actif', true)
+      .order('nom')
+      .then(({ data, error }) => {
+        if (error) console.warn('[SUIVI FRIGO] Exploitations illisibles :', error.message)
+        if (vivant) setFermes(data ?? [])
+      })
+    return () => { vivant = false }
+  }, [profil?.id, profil?.role])
 
   const connexion = useCallback(
     async (codeFerme, identifiant, motDePasse) => {
@@ -111,10 +135,20 @@ export function FournisseurAuth({ children }) {
     if (session?.user) setProfil(await chargerProfil(session.user.id))
   }, [session, chargerProfil])
 
+  /* « ferme » désigne l'exploitation actuellement consultée : pour tout le
+     monde sauf le siège, c'est la sienne et rien d'autre. « fermeSienne »
+     reste celle du compte — c'est là, et seulement là, qu'on saisit. */
+  const fermeSienne = profil?.ferme ?? null
+  const fermeVue = fermes.find((f) => f.id === fermeVueId) ?? fermeSienne
+
   const valeur = {
     session,
     profil,
-    ferme: profil?.ferme ?? null,
+    ferme: fermeVue,
+    fermeSienne,
+    fermes,
+    changerFermeVue: setFermeVueId,
+    consulteAutreFerme: !!fermeSienne && !!fermeVue && fermeVue.id !== fermeSienne.id,
     chargement,
     estAdmin: profil?.role === 'admin' || profil?.role === 'super_admin',
     estSuperAdmin: profil?.role === 'super_admin',
