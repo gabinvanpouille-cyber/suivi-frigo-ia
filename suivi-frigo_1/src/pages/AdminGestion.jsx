@@ -65,7 +65,12 @@ export default function AdminGestion() {
 /* ===================================================================== */
 /*  Onglet 1 — Frigos                                                    */
 /* ===================================================================== */
-const FRIGO_VIDE = { nom: '', emplacement: '', produit: 'pdt', temp_min: '0', temp_max: '4', ordre: 0, actif: true }
+const FRIGO_VIDE = {
+  nom: '', emplacement: '', produit: 'pdt',
+  temp_min: '0', temp_max: '4',
+  suivi_hygro: false, hygro_min: '', hygro_max: '',
+  ordre: 0, actif: true,
+}
 
 function OngletFrigos({ ferme, setMsg }) {
   const [liste, setListe] = useState([])
@@ -103,6 +108,31 @@ function OngletFrigos({ ferme, setMsg }) {
       return setMsg({ type: 'ko', texte: 'La température minimale doit être inférieure à la maximale.' })
     }
 
+    /* Hygrométrie : suivi facultatif. Les seuils ne sont exigés que si la case
+       est cochée, et rester vide reste permis — on relever alors sans juger. */
+    const suiviHygro = !!edition.suivi_hygro
+    const nombreOuNull = (v) => {
+      const t = String(v ?? '').trim()
+      if (!t) return null
+      const n = Number(t.replace(',', '.'))
+      return Number.isFinite(n) ? n : NaN
+    }
+    const hMin = suiviHygro ? nombreOuNull(edition.hygro_min) : null
+    const hMax = suiviHygro ? nombreOuNull(edition.hygro_max) : null
+
+    if (Number.isNaN(hMin) || Number.isNaN(hMax)) {
+      return setMsg({ type: 'ko', texte: 'Les seuils d’hygrométrie doivent être des nombres.' })
+    }
+    if (hMin !== null && (hMin < 0 || hMin > 100)) {
+      return setMsg({ type: 'ko', texte: 'L’hygrométrie minimale doit être comprise entre 0 et 100 %.' })
+    }
+    if (hMax !== null && (hMax < 0 || hMax > 100)) {
+      return setMsg({ type: 'ko', texte: 'L’hygrométrie maximale doit être comprise entre 0 et 100 %.' })
+    }
+    if (hMin !== null && hMax !== null && hMin >= hMax) {
+      return setMsg({ type: 'ko', texte: 'L’hygrométrie minimale doit être inférieure à la maximale.' })
+    }
+
     setOccupe(true)
     const champs = {
       ferme_id: ferme.id,
@@ -111,6 +141,9 @@ function OngletFrigos({ ferme, setMsg }) {
       produit: edition.produit || 'pdt',
       temp_min: min,
       temp_max: max,
+      suivi_hygro: suiviHygro,
+      hygro_min: hMin,
+      hygro_max: hMax,
       ordre: Number(edition.ordre) || 0,
       actif: !!edition.actif,
     }
@@ -159,7 +192,7 @@ function OngletFrigos({ ferme, setMsg }) {
             <table>
               <thead>
                 <tr>
-                  <th>Ordre</th><th>Nom</th><th>Produit</th><th>Emplacement</th>
+                  <th>Ordre</th><th>Nom</th><th>Produit</th><th>Hygro.</th><th>Emplacement</th>
                   <th>Seuil min</th><th>Seuil max</th><th>État</th><th></th>
                 </tr>
               </thead>
@@ -169,6 +202,13 @@ function OngletFrigos({ ferme, setMsg }) {
                     <td className="num muet">{f.ordre}</td>
                     <td className="gras">{f.nom}</td>
                     <td className="tres-petit">{libelleProduit(produits, f.produit)}</td>
+                    <td className="tres-petit muet">
+                      {!f.suivi_hygro
+                        ? '—'
+                        : f.hygro_min !== null && f.hygro_max !== null
+                        ? `${Number(f.hygro_min).toFixed(0)}–${Number(f.hygro_max).toFixed(0)} %`
+                        : 'sans seuil'}
+                    </td>
                     <td className="tres-petit muet">{f.emplacement || '—'}</td>
                     <td className="num">{Number(f.temp_min).toFixed(1)} °C</td>
                     <td className="num">{Number(f.temp_max).toFixed(1)} °C</td>
@@ -236,6 +276,43 @@ function OngletFrigos({ ferme, setMsg }) {
                        onChange={(e) => setEdition({ ...edition, temp_max: e.target.value })} />
               </div>
             </div>
+            {/* Hygrométrie : rien ne change pour les chambres où la case reste décochée. */}
+            <div className="champ">
+              <label className="rangee" style={{ gap: '.5rem', cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={!!edition.suivi_hygro}
+                  onChange={(e) => setEdition({ ...edition, suivi_hygro: e.target.checked })}
+                  style={{ width: 'auto', margin: 0 }}
+                />
+                Relever aussi l’hygrométrie de cette chambre
+              </label>
+            </div>
+
+            {edition.suivi_hygro && (
+              <>
+                <div className="grille k2">
+                  <div className="champ">
+                    <label htmlFor="fhmin">Hygrométrie minimale (%)</label>
+                    <input id="fhmin" type="text" inputMode="decimal" value={edition.hygro_min ?? ''}
+                           placeholder="facultatif"
+                           onChange={(e) => setEdition({ ...edition, hygro_min: e.target.value })} />
+                  </div>
+                  <div className="champ">
+                    <label htmlFor="fhmax">Hygrométrie maximale (%)</label>
+                    <input id="fhmax" type="text" inputMode="decimal" value={edition.hygro_max ?? ''}
+                           placeholder="facultatif"
+                           onChange={(e) => setEdition({ ...edition, hygro_max: e.target.value })} />
+                  </div>
+                </div>
+                <p className="aide">
+                  Laissez les seuils vides pour enregistrer l’hygrométrie sans la juger. S’ils sont
+                  renseignés, un dépassement apparaît en rouge dans l’application et dans l’export,
+                  mais ne déclenche ni SMS ni notification.
+                </p>
+              </>
+            )}
+
             <div className="grille k2">
               <div className="champ">
                 <label htmlFor="fo">Ordre d’affichage</label>
