@@ -40,7 +40,7 @@ export default function Historique() {
       .select(
         'id, date_releve, heure_releve, statut, remarque, nb_modifications, modifie_at, auteur_id, auteur_nom, produit,' +
         ' auteur:profiles(identifiant, nom_complet),' +
-        ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque,' +
+        ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque, en_descente,' +
         ' hygrometrie, seuil_hygro_min, seuil_hygro_max, hygro_conforme, frigo:frigos(nom))'
       )
       .eq('ferme_id', ferme.id)
@@ -181,9 +181,14 @@ export default function Historique() {
                                   <td>{m.frigo?.nom}</td>
                                   <td
                                     className="num"
-                                    style={{ color: m.conforme === false ? 'var(--rouge)' : undefined }}
+                                    style={{
+                                      color: m.conforme === false ? 'var(--rouge)'
+                                        : m.en_descente ? 'var(--bleu)' : undefined,
+                                    }}
+                                    title={m.en_descente ? 'Chambre en descente de température' : undefined}
                                   >
                                     {temp(m.temperature)}
+                                    {m.en_descente && ' ↓'}
                                   </td>
                                   <td className="num muet tres-petit">
                                     {temp(m.seuil_min)} → {temp(m.seuil_max)}
