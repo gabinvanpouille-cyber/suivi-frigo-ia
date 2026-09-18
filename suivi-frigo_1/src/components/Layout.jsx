@@ -26,7 +26,10 @@ const LIENS_ADMIN = [
 ]
 
 export default function Layout() {
-  const { profil, estAdmin, ferme } = useAuth()
+  const {
+    profil, estAdmin, estSuperAdmin, ferme,
+    fermes, fermeSienne, changerFermeVue, consulteAutreFerme,
+  } = useAuth()
   const location = useLocation()
   const [nonLues, setNonLues] = useState(0)
 
@@ -104,6 +107,29 @@ export default function Layout() {
           </NavLink>
         ))}
       </nav>
+
+      {/* Siège : bascule d'une exploitation à l'autre pour les consulter. */}
+      {estSuperAdmin && fermes.length > 1 && (
+        <div className={`barre-ferme${consulteAutreFerme ? ' ailleurs' : ''}`}>
+          <label htmlFor="fv">Exploitation</label>
+          <select
+            id="fv"
+            value={ferme?.id ?? ''}
+            onChange={(e) => changerFermeVue(e.target.value)}
+          >
+            {fermes.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.nom}{f.id === fermeSienne?.id ? ' (la vôtre)' : ''}
+              </option>
+            ))}
+          </select>
+          {consulteAutreFerme && (
+            <span className="note">
+              consultation — la saisie reste sur {fermeSienne?.nom}
+            </span>
+          )}
+        </div>
+      )}
 
       <main className="contenu">
         <Outlet />
