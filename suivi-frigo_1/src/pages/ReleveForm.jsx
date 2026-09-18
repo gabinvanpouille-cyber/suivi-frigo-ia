@@ -12,6 +12,13 @@ import { IcCheck, IcPhoto, IcCroix, IcAlerte, IcRetour, IcThermo } from '../comp
 import Onglets from '../components/Onglets'
 import { useProduits, libelleProduit } from '../lib/produits'
 
+/** Conformité de l'hygrométrie : null quand il n'y a rien à juger. */
+function hygroConforme(valeur, min, max) {
+  const v = versNombre(valeur)
+  if (v === null || min === null || min === undefined || max === null || max === undefined) return null
+  return v >= Number(min) && v <= Number(max)
+}
+
 export default function ReleveForm() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -63,7 +70,9 @@ export default function ReleveForm() {
         .select(
           'id, date_releve, heure_releve, statut, remarque, nb_modifications, auteur_id, produit,' +
           ' mesures(id, frigo_id, temperature, seuil_min, seuil_max, remarque, photo_url,' +
-          ' frigo:frigos(id, nom, emplacement, temp_min, temp_max, ordre))'
+          ' hygrometrie, seuil_hygro_min, seuil_hygro_max,' +
+          ' frigo:frigos(id, nom, emplacement, temp_min, temp_max, ordre,' +
+          ' suivi_hygro, hygro_min, hygro_max))'
         )
         .eq('id', id)
         .maybeSingle()
@@ -81,7 +90,7 @@ export default function ReleveForm() {
     /* 2. Les chambres froides de ce produit uniquement. */
     const { data: frigos, error: eFrigos } = await supabase
       .from('frigos')
-      .select('id, nom, emplacement, temp_min, temp_max, ordre')
+      .select('id, nom, emplacement, temp_min, temp_max, ordre, suivi_hygro, hygro_min, hygro_max')
       .eq('ferme_id', ferme.id)
       .eq('produit', prod)
       .eq('actif', true)
@@ -101,8 +110,8 @@ export default function ReleveForm() {
       setLignes(
         conserve ??
           (frigos ?? []).map((f) => ({
-            frigo: f, mesureId: null, temperature: '', remarqueMesure: '',
-            photoChemin: null, fichier: null,
+            frigo: f, mesureId: null, temperature: '', hygrometrie: '',
+            remarqueMesure: '', photoChemin: null, fichier: null,
           }))
       )
       setRemarque(remarquesLocales.current[prod] ?? '')
@@ -134,11 +143,15 @@ export default function ReleveForm() {
           mesureId: m?.id ?? null,
           temperature: m?.temperature !== undefined && m?.temperature !== null
             ? String(m.temperature).replace('.', ',') : '',
+          hygrometrie: m?.hygrometrie !== undefined && m?.hygrometrie !== null
+            ? String(m.hygrometrie).replace('.', ',') : '',
           remarqueMesure: m?.remarque ?? '',
           photoChemin: m?.photo_url ?? null,
           fichier: null,
           seuilMin: m?.seuil_min ?? f.temp_min,
           seuilMax: m?.seuil_max ?? f.temp_max,
+          seuilHygroMin: m?.seuil_hygro_min ?? f.hygro_min,
+          seuilHygroMax: m?.seuil_hygro_max ?? f.hygro_max,
         }
       })
 
@@ -274,10 +287,14 @@ export default function ReleveForm() {
           if (l.mesureId) aSupprimer.push(l.mesureId)
           return
         }
+        // L'hygrométrie est facultative : absente, elle vaut null, pas zéro.
+        const hygro = l.frigo.suivi_hygro ? versNombre(l.hygrometrie) : null
+
         if (l.mesureId) {
           aMettreAJour.push({
             id: l.mesureId,
             temperature: valeur,
+            hygrometrie: hygro,
             remarque: l.remarqueMesure || null,
             photo_url: l.photoChemin,
           })
@@ -288,6 +305,9 @@ export default function ReleveForm() {
             temperature: valeur,
             seuil_min: l.frigo.temp_min,
             seuil_max: l.frigo.temp_max,
+            hygrometrie: hygro,
+            seuil_hygro_min: l.frigo.suivi_hygro ? l.frigo.hygro_min : null,
+            seuil_hygro_max: l.frigo.suivi_hygro ? l.frigo.hygro_max : null,
             remarque: l.remarqueMesure || null,
             photo_url: l.photoChemin,
           })
@@ -427,7 +447,10 @@ export default function ReleveForm() {
       {lignes.map((l) => {
         const min = l.seuilMin ?? l.frigo.temp_min
         const max = l.seuilMax ?? l.frigo.temp_max
+        const hMin = l.seuilHygroMin ?? l.frigo.hygro_min
+        const hMax = l.seuilHygroMax ?? l.frigo.hygro_max
         const conforme = estConforme(l.temperature, min, max)
+        const hOk = hygroConforme(l.hygrometrie, hMin, hMax)
         const apercuLocal = urls[`local-${l.frigo.id}`]
         const apercuServeur = l.photoChemin ? urls[l.photoChemin] : null
         const photo = apercuLocal || apercuServeur
@@ -442,29 +465,60 @@ export default function ReleveForm() {
               {l.frigo.emplacement && <span className="tres-petit muet">{l.frigo.emplacement}</span>}
               <span className="seuils">
                 {temp(min)} → {temp(max)}
+                {l.frigo.suivi_hygro && hMin !== null && hMin !== undefined
+                  && hMax !== null && hMax !== undefined && (
+                  <>
+                    <br />
+                    {Number(hMin).toFixed(0)}–{Number(hMax).toFixed(0)} % HR
+                  </>
+                )}
               </span>
             </div>
 
             <div className="saisie">
-              <input
-                className="temp-input"
-                type="text"
-                inputMode="decimal"
-                enterKeyHint="next"
-                placeholder="—"
-                aria-label={`Température ${l.frigo.nom}`}
-                value={l.temperature}
-                onChange={(e) =>
-                  majLigne(l.frigo.id, { temperature: e.target.value.replace(/[^0-9,.\-]/g, '') })
-                }
-                style={
-                  conforme === false
-                    ? { borderColor: 'var(--rouge)', color: 'var(--rouge)' }
-                    : conforme === true
-                    ? { borderColor: 'var(--vert)' }
-                    : undefined
-                }
-              />
+              <div className="pile" style={{ gap: '.4rem' }}>
+                <input
+                  className="temp-input"
+                  type="text"
+                  inputMode="decimal"
+                  enterKeyHint="next"
+                  placeholder="—"
+                  aria-label={`Température ${l.frigo.nom}`}
+                  value={l.temperature}
+                  onChange={(e) =>
+                    majLigne(l.frigo.id, { temperature: e.target.value.replace(/[^0-9,.\-]/g, '') })
+                  }
+                  style={
+                    conforme === false
+                      ? { borderColor: 'var(--rouge)', color: 'var(--rouge)' }
+                      : conforme === true
+                      ? { borderColor: 'var(--vert)' }
+                      : undefined
+                  }
+                />
+
+                {/* Hygrométrie : proposée seulement où elle est suivie, et jamais obligatoire. */}
+                {l.frigo.suivi_hygro && (
+                  <input
+                    className="hygro-input"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="% HR"
+                    aria-label={`Hygrométrie ${l.frigo.nom} (facultatif)`}
+                    value={l.hygrometrie ?? ''}
+                    onChange={(e) =>
+                      majLigne(l.frigo.id, { hygrometrie: e.target.value.replace(/[^0-9,.]/g, '') })
+                    }
+                    style={
+                      hOk === false
+                        ? { borderColor: 'var(--rouge)', color: 'var(--rouge)' }
+                        : hOk === true
+                        ? { borderColor: 'var(--vert)' }
+                        : undefined
+                    }
+                  />
+                )}
+              </div>
 
               <div className="pile" style={{ gap: '.45rem' }}>
                 <input
@@ -511,6 +565,12 @@ export default function ReleveForm() {
               <div className="tres-petit gras mt" style={{ color: 'var(--rouge)' }}>
                 <IcAlerte style={{ width: 13, height: 13, verticalAlign: '-2px' }} />{' '}
                 {ecart(l.temperature, min, max)}
+              </div>
+            )}
+
+            {hOk === false && (
+              <div className="tres-petit gras mt" style={{ color: 'var(--rouge)' }}>
+                Hygrométrie hors des seuils ({Number(hMin).toFixed(0)}–{Number(hMax).toFixed(0)} %)
               </div>
             )}
           </div>
