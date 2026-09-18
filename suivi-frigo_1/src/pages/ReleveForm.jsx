@@ -16,7 +16,9 @@ export default function ReleveForm() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const { profil, ferme, estAdmin } = useAuth()
+  // La saisie se fait toujours dans sa propre exploitation, même quand le
+  // siège est en train d’en consulter une autre.
+  const { profil, fermeSienne: ferme, estAdmin } = useAuth()
   const produits = useProduits()
 
   const [chargement, setChargement] = useState(true)
