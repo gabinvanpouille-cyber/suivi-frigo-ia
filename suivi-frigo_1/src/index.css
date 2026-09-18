@@ -360,3 +360,27 @@ td.num { font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowr
 }
 .onglets button.actif .pastille { background: var(--bleu); color: #fff; }
 @media print { .onglets { display: none !important; } }
+
+/* ---------------------------------------------------------------------
+   Barre de bascule d'exploitation (administrateur général)
+   --------------------------------------------------------------------- */
+.barre-ferme {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .5rem .9rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--bordure);
+}
+.barre-ferme label {
+  font-size: .7rem; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--texte-faible);
+}
+.barre-ferme select {
+  width: auto; min-width: 12rem; max-width: 100%;
+  padding: .35rem .5rem; font-size: .88rem; font-weight: 600;
+}
+.barre-ferme .note { font-size: .75rem; color: var(--ambre); font-weight: 600; }
+.barre-ferme.ailleurs {
+  background: var(--ambre-fond);
+  border-bottom-color: var(--ambre);
+}
+@media print { .barre-ferme { display: none !important; } }
