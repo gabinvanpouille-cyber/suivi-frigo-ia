@@ -13,6 +13,18 @@ create extension if not exists "pgcrypto";
 -- 1. Tables
 -- ---------------------------------------------------------------------
 
+-- 1.0 Produits suivis (pommes de terre, échalotes, …)
+create table if not exists public.produits (
+  code    text primary key,
+  libelle text not null,
+  ordre   integer not null default 0
+);
+
+insert into public.produits (code, libelle, ordre) values
+  ('pdt', 'Pommes de terre', 1),
+  ('echalote', 'Échalotes', 2)
+on conflict (code) do update set libelle = excluded.libelle, ordre = excluded.ordre;
+
 -- 1.1 Fermes (les « locataires » de l'application)
 create table if not exists public.fermes (
   id                 uuid primary key default gen_random_uuid(),
@@ -49,14 +61,22 @@ create table if not exists public.frigos (
   ferme_id     uuid not null references public.fermes(id) on delete cascade,
   nom          text not null,
   emplacement  text,
+  produit      text not null default 'pdt' references public.produits(code),
   temp_min     numeric(5,2) not null default 0,
   temp_max     numeric(5,2) not null default 4,
+  -- Hygrométrie : suivi facultatif, activé chambre par chambre.
+  suivi_hygro  boolean not null default false,
+  hygro_min    numeric(5,2),
+  hygro_max    numeric(5,2),
   ordre        integer not null default 0,
   actif        boolean not null default true,
   created_at   timestamptz not null default now(),
-  constraint frigos_seuils check (temp_min < temp_max)
+  constraint frigos_seuils check (temp_min < temp_max),
+  constraint frigos_seuils_hygro
+    check (hygro_min is null or hygro_max is null or hygro_min < hygro_max)
 );
 create index if not exists frigos_ferme_idx on public.frigos(ferme_id, actif, ordre);
+create index if not exists frigos_produit_idx on public.frigos(ferme_id, produit, actif, ordre);
 
 -- 1.4 Relevés (une session de relevé, à une heure donnée)
 create table if not exists public.releves (
@@ -67,6 +87,7 @@ create table if not exists public.releves (
   auteur_nom        text,
   date_releve       date not null default (now() at time zone 'Europe/Paris')::date,
   heure_releve      time not null,
+  produit           text not null default 'pdt' references public.produits(code),
   statut            text not null default 'brouillon' check (statut in ('brouillon','valide')),
   remarque          text,
   photo_url         text,
@@ -77,6 +98,7 @@ create table if not exists public.releves (
 );
 create index if not exists releves_ferme_date_idx on public.releves(ferme_id, date_releve desc);
 create index if not exists releves_auteur_idx on public.releves(auteur_id, date_releve desc);
+create index if not exists releves_produit_idx on public.releves(ferme_id, produit, date_releve desc);
 
 -- 1.5 Mesures (une ligne par frigo dans un relevé)
 create table if not exists public.mesures (
@@ -89,11 +111,33 @@ create table if not exists public.mesures (
   remarque     text,
   photo_url    text,
   created_at   timestamptz not null default now(),
+  -- Mise en froid : la chambre monte volontairement au-dessus de ses seuils.
+  -- La mesure est enregistrée, mais elle n'est ni jugée ni signalée. À réarmer
+  -- à chaque relevé : rien n'est reporté d'un jour sur l'autre.
+  en_descente  boolean not null default false,
   conforme     boolean generated always as (
-                 temperature is not null
-                 and temperature >= seuil_min
-                 and temperature <= seuil_max
+                 case
+                   when en_descente then null
+                   else temperature is not null
+                    and temperature >= seuil_min
+                    and temperature <= seuil_max
+                 end
                ) stored,
+  -- Hygrométrie : facultative. Les seuils sont figés au moment du relevé,
+  -- comme ceux de température.
+  hygrometrie     numeric(5,2),
+  seuil_hygro_min numeric(5,2),
+  seuil_hygro_max numeric(5,2),
+  -- NULL quand il n'y a rien à juger : pas de mesure, ou pas de seuils.
+  hygro_conforme  boolean generated always as (
+                    case
+                      when hygrometrie is null
+                        or seuil_hygro_min is null
+                        or seuil_hygro_max is null then null
+                      else hygrometrie >= seuil_hygro_min
+                       and hygrometrie <= seuil_hygro_max
+                    end
+                  ) stored,
   unique (releve_id, frigo_id)
 );
 create index if not exists mesures_releve_idx on public.mesures(releve_id);
@@ -323,15 +367,27 @@ select
   m.conforme,
   m.remarque          as remarque_mesure,
   m.photo_url,
-  (r.date_releve + r.heure_releve) as horodatage
+  (r.date_releve + r.heure_releve) as horodatage,
+  r.produit,
+  m.hygrometrie,
+  m.seuil_hygro_min,
+  m.seuil_hygro_max,
+  m.hygro_conforme,
+  fr.suivi_hygro,
+  m.en_descente
 from public.mesures m
 join public.releves r on r.id = m.releve_id
 join public.frigos  fr on fr.id = m.frigo_id
 join public.fermes  f  on f.id = r.ferme_id
 left join public.profiles p on p.id = r.auteur_id;
 
+-- La vue est recréée à chaque changement de colonne : le droit de lecture
+-- doit être redonné dans la foulée, sinon l'application ne voit plus rien.
+grant select on public.v_mesures_completes to authenticated;
+
 -- Journées sans aucun relevé validé (utilisé par le tableau de bord admin)
-create or replace function public.jours_sans_releve(p_ferme uuid, p_depuis date, p_jusqu date)
+drop function if exists public.jours_sans_releve(uuid, date, date);
+create or replace function public.jours_sans_releve(p_ferme uuid, p_depuis date, p_jusqu date, p_produit text default null)
 returns table(jour date)
 language sql stable security definer set search_path = public as $$
   select d::date
@@ -343,13 +399,18 @@ language sql stable security definer set search_path = public as $$
       select 1 from public.releves r
       where r.ferme_id = p_ferme
         and r.date_releve = d::date
-        and r.statut = 'valide')
+        and r.statut = 'valide'
+        and (p_produit is null or r.produit = p_produit))
 $$;
 grant execute on function public.jours_sans_releve to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 5. Row Level Security
 -- ---------------------------------------------------------------------
+alter table public.produits           enable row level security;
+drop policy if exists produits_select on public.produits;
+create policy produits_select on public.produits for select to authenticated using (true);
+
 alter table public.fermes             enable row level security;
 alter table public.profiles           enable row level security;
 alter table public.frigos             enable row level security;
