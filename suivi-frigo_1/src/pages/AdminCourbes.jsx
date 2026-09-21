@@ -21,6 +21,15 @@ const RACCOURCIS = [
   { libelle: '3 mois', jours: 90 },
 ]
 
+const MODES = [
+  { code: 'temp', libelle: 'Température' },
+  { code: 'hygro', libelle: 'Hygrométrie' },
+  { code: 'deux', libelle: 'Les deux croisées' },
+]
+
+/** Clé de série de l'hygrométrie — distincte de celle de la température. */
+const cleHygro = (frigoId) => `${frigoId}__h`
+
 export default function AdminCourbes() {
   const { ferme } = useAuth()
   const produits = useProduits()
@@ -32,6 +41,7 @@ export default function AdminCourbes() {
   const [debut, setDebut] = useState(decalerJours(finDefaut, -29))
   const [fin, setFin] = useState(finDefaut)
   const [produit, setProduit] = useState('pdt')
+  const [mode, setMode] = useState('temp')
   const [selection, setSelection] = useState([])   // ids de frigos affichés
   const [frigos, setFrigos] = useState([])
   const [mesures, setMesures] = useState([])
@@ -45,13 +55,14 @@ export default function AdminCourbes() {
     const [rFrigos, rMesures] = await Promise.all([
       supabase
         .from('frigos')
-        .select('id, nom, emplacement, temp_min, temp_max, actif, ordre')
+        .select('id, nom, emplacement, temp_min, temp_max, actif, ordre, suivi_hygro, hygro_min, hygro_max')
         .eq('ferme_id', ferme.id)
         .eq('produit', produit)
         .order('ordre'),
       supabase
         .from('v_mesures_completes')
-        .select('releve_id, frigo_id, frigo_nom, date_releve, heure_releve, temperature, seuil_min, seuil_max, conforme')
+        .select('releve_id, frigo_id, frigo_nom, date_releve, heure_releve, temperature, seuil_min, seuil_max, conforme,' +
+                ' hygrometrie, seuil_hygro_min, seuil_hygro_max, hygro_conforme')
         .eq('ferme_id', ferme.id)
         .eq('produit', produit)
         .eq('statut', 'valide')
@@ -98,14 +109,28 @@ export default function AdminCourbes() {
           jour: m.date_releve,
         })
       }
-      parInstant.get(cle)[m.frigo_id] = Number(m.temperature)
-      parInstant.get(cle)[`${m.frigo_id}__ok`] = m.conforme
+      const point = parInstant.get(cle)
+      point[m.frigo_id] = Number(m.temperature)
+      point[`${m.frigo_id}__ok`] = m.conforme
+      if (m.hygrometrie !== null && m.hygrometrie !== undefined) {
+        point[cleHygro(m.frigo_id)] = Number(m.hygrometrie)
+        point[`${cleHygro(m.frigo_id)}__ok`] = m.hygro_conforme
+      }
     })
     return [...parInstant.values()].sort((a, b) => a.cle.localeCompare(b.cle))
   }, [mesures, selection])
 
+  const montreTemp = mode === 'temp' || mode === 'deux'
+  const montreHygro = mode === 'hygro' || mode === 'deux'
+
+  /* Seules les chambres où l'hygrométrie est suivie ont une courbe d'humidité. */
+  const affichesHygro = useMemo(
+    () => affiches.filter((f) => f.suivi_hygro),
+    [affiches]
+  )
+
   /* ---- Bande de conformité : seulement si un seul frigo est affiché --- */
-  const bande = affiches.length === 1 ? affiches[0] : null
+  const bande = montreTemp && affiches.length === 1 ? affiches[0] : null
 
   /* ---- Statistiques ---------------------------------------------------*/
   const stats = useMemo(
@@ -115,6 +140,14 @@ export default function AdminCourbes() {
         const vals = liste.map((m) => Number(m.temperature))
         const nc = liste.filter((m) => m.conforme === false).length
         const moy = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+
+        const listeH = mesures.filter(
+          (m) => m.frigo_id === f.id && m.hygrometrie !== null && m.hygrometrie !== undefined
+        )
+        const valsH = listeH.map((m) => Number(m.hygrometrie))
+        const ncH = listeH.filter((m) => m.hygro_conforme === false).length
+        const moyH = valsH.length ? valsH.reduce((a, b) => a + b, 0) / valsH.length : null
+
         return {
           frigo: f,
           n: vals.length,
@@ -123,6 +156,11 @@ export default function AdminCourbes() {
           max: vals.length ? Math.max(...vals) : null,
           nc,
           taux: vals.length ? pourcentage(vals.length - nc, vals.length) : null,
+          nH: valsH.length,
+          moyH,
+          minH: valsH.length ? Math.min(...valsH) : null,
+          maxH: valsH.length ? Math.max(...valsH) : null,
+          ncH,
           couleur: couleurSerie(ordreCouleurs.get(f.id) ?? 0, sombre),
         }
       }),
@@ -161,11 +199,16 @@ export default function AdminCourbes() {
         <div style={{ color: t.encreDouce, marginBottom: 4, fontWeight: 600 }}>{label}</div>
         {payload.map((p) => {
           const conforme = p.payload[`${p.dataKey}__ok`]
+          const estHygro = String(p.dataKey).endsWith('__h')
           return (
             <div key={p.dataKey} style={{ display: 'flex', alignItems: 'center', gap: 6, color: t.encre }}>
               <span style={{ width: 9, height: 9, borderRadius: 2, background: p.stroke, flex: 'none' }} />
               <span style={{ flex: 1 }}>{p.name}</span>
-              <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{temp(p.value)}</strong>
+              <strong style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {estHygro
+                  ? (p.value === null || p.value === undefined ? '—' : `${Number(p.value).toFixed(0)} %`)
+                  : temp(p.value)}
+              </strong>
               {conforme === false && (
                 <span style={{ color: etat.critique, fontWeight: 700 }}>!</span>
               )}
@@ -218,6 +261,14 @@ export default function AdminCourbes() {
             <label htmlFor="c2">Au</label>
             <input id="c2" type="date" value={fin} min={debut} onChange={(e) => setFin(e.target.value)} />
           </div>
+          <div className="champ" style={{ flex: '0 0 190px' }}>
+            <label htmlFor="cm">Afficher</label>
+            <select id="cm" value={mode} onChange={(e) => setMode(e.target.value)}>
+              {MODES.map((m) => (
+                <option key={m.code} value={m.code}>{m.libelle}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="rangee">
@@ -257,7 +308,11 @@ export default function AdminCourbes() {
       <div className="carte">
         <div className="carte-titre">
           <IcCourbe style={{ width: 19, height: 19 }} />
-          <h2>Températures relevées</h2>
+          <h2>
+            {mode === 'temp' ? 'Températures relevées'
+              : mode === 'hygro' ? 'Hygrométrie relevée'
+              : 'Température et hygrométrie'}
+          </h2>
           {bande && (
             <span className="droite">
               <Etiquette type="ok">
@@ -267,7 +322,13 @@ export default function AdminCourbes() {
           )}
         </div>
 
-        {!donnees.length ? (
+        {mode === 'hygro' && !affichesHygro.length ? (
+          <Vide
+            icone={IcCourbe}
+            titre="Hygrométrie non suivie"
+            texte="Aucune des chambres sélectionnées ne relève l’hygrométrie. Cochez-la dans Gestion ▸ Chambres froides."
+          />
+        ) : !donnees.length ? (
           <Vide
             icone={IcCourbe}
             titre="Aucune donnée"
@@ -281,6 +342,7 @@ export default function AdminCourbes() {
 
                 {bande && (
                   <ReferenceArea
+                    yAxisId="t"
                     y1={Number(bande.temp_min)}
                     y2={Number(bande.temp_max)}
                     fill={etat.bon}
@@ -291,9 +353,9 @@ export default function AdminCourbes() {
                 )}
                 {bande && (
                   <>
-                    <ReferenceLine y={Number(bande.temp_max)} stroke={etat.alerte}
+                    <ReferenceLine yAxisId="t" y={Number(bande.temp_max)} stroke={etat.alerte}
                                    strokeDasharray="5 4" strokeWidth={1.5} />
-                    <ReferenceLine y={Number(bande.temp_min)} stroke={etat.alerte}
+                    <ReferenceLine yAxisId="t" y={Number(bande.temp_min)} stroke={etat.alerte}
                                    strokeDasharray="5 4" strokeWidth={1.5} />
                   </>
                 )}
@@ -305,32 +367,71 @@ export default function AdminCourbes() {
                   axisLine={{ stroke: t.grille }}
                   minTickGap={28}
                 />
-                <YAxis
-                  unit="°"
-                  tick={{ fill: t.encreFaible, fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={52}
-                />
+                {/* Deux échelles distinctes : les degrés à gauche, les pourcents à droite. */}
+                {montreTemp && (
+                  <YAxis
+                    yAxisId="t"
+                    unit="°"
+                    orientation="left"
+                    tick={{ fill: t.encreFaible, fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={52}
+                  />
+                )}
+                {montreHygro && (
+                  <YAxis
+                    yAxisId="h"
+                    unit="%"
+                    orientation="right"
+                    domain={[0, 100]}
+                    tick={{ fill: t.encreFaible, fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={48}
+                  />
+                )}
                 <Tooltip content={<Infobulle />} cursor={{ stroke: t.encreFaible, strokeDasharray: '3 3' }} />
-                {affiches.length > 1 && (
+                {(affiches.length > 1 || mode === 'deux') && (
                   <Legend
                     wrapperStyle={{ fontSize: '.8rem', color: t.encreDouce, paddingTop: 6 }}
                     iconType="plainline"
                   />
                 )}
 
-                {affiches.map((f) => {
+                {montreTemp && affiches.map((f) => {
                   const couleur = couleurSerie(ordreCouleurs.get(f.id) ?? 0, sombre)
                   return (
                     <Line
                       key={f.id}
+                      yAxisId="t"
                       type="monotone"
                       dataKey={f.id}
-                      name={f.nom}
+                      name={mode === 'deux' ? `${f.nom} — °C` : f.nom}
                       stroke={couleur}
                       strokeWidth={2}
                       dot={pointConditionnel(f.id, couleur)}
+                      activeDot={{ r: 5, strokeWidth: 2, stroke: t.surface }}
+                      connectNulls
+                      isAnimationActive={false}
+                    />
+                  )
+                })}
+
+                {/* L'hygrométrie se distingue au trait : pointillés, même couleur. */}
+                {montreHygro && affichesHygro.map((f) => {
+                  const couleur = couleurSerie(ordreCouleurs.get(f.id) ?? 0, sombre)
+                  return (
+                    <Line
+                      key={cleHygro(f.id)}
+                      yAxisId="h"
+                      type="monotone"
+                      dataKey={cleHygro(f.id)}
+                      name={mode === 'deux' ? `${f.nom} — % HR` : `${f.nom} (HR)`}
+                      stroke={couleur}
+                      strokeWidth={mode === 'deux' ? 1.6 : 2}
+                      strokeDasharray={mode === 'deux' ? '5 4' : undefined}
+                      dot={pointConditionnel(cleHygro(f.id), couleur)}
                       activeDot={{ r: 5, strokeWidth: 2, stroke: t.surface }}
                       connectNulls
                       isAnimationActive={false}
@@ -357,6 +458,9 @@ export default function AdminCourbes() {
       <div className="carte">
         <div className="carte-titre">
           <h2>Synthèse par frigo</h2>
+          {montreHygro && (
+            <span className="droite tres-petit muet">HR = hygrométrie relative</span>
+          )}
         </div>
         {!stats.length ? (
           <Vide texte="Sélectionnez au moins un frigo." />
@@ -367,6 +471,11 @@ export default function AdminCourbes() {
                 <tr>
                   <th>Frigo</th><th>Seuils</th><th>Mesures</th><th>Moyenne</th>
                   <th>Mini</th><th>Maxi</th><th>Hors seuils</th><th>Conformité</th>
+                  {montreHygro && (
+                    <>
+                      <th>HR moy.</th><th>HR mini</th><th>HR maxi</th><th>HR hors seuils</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -396,6 +505,16 @@ export default function AdminCourbes() {
                         </Etiquette>
                       )}
                     </td>
+                    {montreHygro && (
+                      <>
+                        <td className="num">{s.moyH === null ? '—' : `${s.moyH.toFixed(0)} %`}</td>
+                        <td className="num">{s.minH === null ? '—' : `${s.minH.toFixed(0)} %`}</td>
+                        <td className="num">{s.maxH === null ? '—' : `${s.maxH.toFixed(0)} %`}</td>
+                        <td className="num" style={{ color: s.ncH ? etat.critique : undefined }}>
+                          {s.nH ? s.ncH : '—'}
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>

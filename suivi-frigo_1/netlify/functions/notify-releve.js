@@ -53,7 +53,8 @@ export default gerer(async (request) => {
       'id, ferme_id, date_releve, heure_releve, statut, remarque, nb_modifications, auteur_nom, produit,' +
       ' ferme:fermes(id, nom, code),' +
       ' auteur:profiles(identifiant, nom_complet),' +
-      ' mesures(temperature, seuil_min, seuil_max, conforme, remarque, frigo:frigos(nom, emplacement))'
+      ' mesures(temperature, seuil_min, seuil_max, conforme, remarque, en_descente,' +
+      ' frigo:frigos(nom, emplacement))'
     )
     .eq('id', releveId)
     .maybeSingle()
@@ -79,6 +80,10 @@ export default gerer(async (request) => {
 
   /* ---- Texte du récapitulatif ---- */
   const lignes = mesures.map((m) => {
+    // Une chambre en descente est signalée comme telle, pas comme conforme.
+    if (m.en_descente) {
+      return `↓ ${m.frigo?.nom} : ${formaterTemp(m.temperature)} (en descente)`
+    }
     const marque = m.conforme === false ? '⚠' : '✓'
     return `${marque} ${m.frigo?.nom} : ${formaterTemp(m.temperature)}`
   })

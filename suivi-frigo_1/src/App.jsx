@@ -48,6 +48,7 @@ export default function App() {
           <Route index element={estAdmin ? <Navigate to="/admin" replace /> : <Accueil />} />
           <Route path="/releve/nouveau" element={<ReleveForm />} />
           <Route path="/releve/:id" element={<ReleveForm />} />
+          <Route path="/courbes" element={<AdminCourbes />} />
           <Route path="/historique" element={<Historique />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/reglages" element={<Reglages />} />

@@ -40,7 +40,8 @@ export default function Historique() {
       .select(
         'id, date_releve, heure_releve, statut, remarque, nb_modifications, modifie_at, auteur_id, auteur_nom, produit,' +
         ' auteur:profiles(identifiant, nom_complet),' +
-        ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque, frigo:frigos(nom))'
+        ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque, en_descente,' +
+        ' hygrometrie, seuil_hygro_min, seuil_hygro_max, hygro_conforme, frigo:frigos(nom))'
       )
       .eq('ferme_id', ferme.id)
       .eq('produit', produit)
@@ -114,6 +115,10 @@ export default function Historique() {
               {liste.map((r) => {
                 const mesures = r.mesures ?? []
                 const nc = mesures.filter((m) => m.conforme === false)
+                // La colonne hygrométrie ne s'affiche que si ce relevé en porte.
+                const aHygro = mesures.some(
+                  (m) => m.hygrometrie !== null && m.hygrometrie !== undefined
+                )
                 const estOuvert = ouvert === r.id
                 return (
                   <li key={r.id} style={{ borderBottom: '1px solid var(--bordure)' }}>
@@ -166,6 +171,7 @@ export default function Historique() {
                                 <th>Frigo</th>
                                 <th>Température</th>
                                 <th>Seuils</th>
+                                {aHygro && <th>Hygrométrie</th>}
                                 <th>Remarque</th>
                               </tr>
                             </thead>
@@ -175,13 +181,28 @@ export default function Historique() {
                                   <td>{m.frigo?.nom}</td>
                                   <td
                                     className="num"
-                                    style={{ color: m.conforme === false ? 'var(--rouge)' : undefined }}
+                                    style={{
+                                      color: m.conforme === false ? 'var(--rouge)'
+                                        : m.en_descente ? 'var(--bleu)' : undefined,
+                                    }}
+                                    title={m.en_descente ? 'Chambre en descente de température' : undefined}
                                   >
                                     {temp(m.temperature)}
+                                    {m.en_descente && ' ↓'}
                                   </td>
                                   <td className="num muet tres-petit">
                                     {temp(m.seuil_min)} → {temp(m.seuil_max)}
                                   </td>
+                                  {aHygro && (
+                                    <td
+                                      className="num tres-petit"
+                                      style={{ color: m.hygro_conforme === false ? 'var(--rouge)' : undefined }}
+                                    >
+                                      {m.hygrometrie === null || m.hygrometrie === undefined
+                                        ? '—'
+                                        : `${Number(m.hygrometrie).toFixed(0)} %`}
+                                    </td>
+                                  )}
                                   <td className="tres-petit muet">{m.remarque || '—'}</td>
                                 </tr>
                               ))}

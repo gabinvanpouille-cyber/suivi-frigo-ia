@@ -56,7 +56,12 @@ export async function exporterExcel(mesures, historique, meta) {
     { header: 'Seuil min', key: 'min', width: 10 },
     { header: 'Seuil max', key: 'max', width: 10 },
     { header: 'Conformité', key: 'conf', width: 14 },
+    { header: 'En descente', key: 'descente', width: 12 },
     { header: 'Écart (°C)', key: 'ecart', width: 11 },
+    { header: 'Hygrométrie (%)', key: 'hygro', width: 15 },
+    { header: 'HR min', key: 'hmin', width: 9 },
+    { header: 'HR max', key: 'hmax', width: 9 },
+    { header: 'HR conforme', key: 'hconf', width: 13 },
     { header: 'Relevé par', key: 'auteur', width: 20 },
     { header: 'Statut', key: 'statut', width: 12 },
     { header: 'Modifications', key: 'modifs', width: 13 },
@@ -80,8 +85,14 @@ export async function exporterExcel(mesures, historique, meta) {
       temp: t,
       min: Number(m.seuil_min),
       max: Number(m.seuil_max),
-      conf: m.conforme ? 'Conforme' : 'NON CONFORME',
-      ecart: e,
+      conf: m.en_descente ? 'En descente' : m.conforme ? 'Conforme' : 'NON CONFORME',
+      descente: m.en_descente ? 'Oui' : '',
+      ecart: m.en_descente ? null : e,
+      hygro: m.hygrometrie === null || m.hygrometrie === undefined ? null : Number(m.hygrometrie),
+      hmin: m.seuil_hygro_min === null || m.seuil_hygro_min === undefined ? null : Number(m.seuil_hygro_min),
+      hmax: m.seuil_hygro_max === null || m.seuil_hygro_max === undefined ? null : Number(m.seuil_hygro_max),
+      hconf: m.hygro_conforme === null || m.hygro_conforme === undefined
+        ? '' : m.hygro_conforme ? 'Conforme' : 'NON CONFORME',
       auteur: m.auteur_nom || '',
       statut: m.statut === 'valide' ? 'Validé' : 'Brouillon',
       modifs: m.nb_modifications || 0,
@@ -94,9 +105,25 @@ export async function exporterExcel(mesures, historique, meta) {
     ligne.getCell('min').numFmt = '0.0'
     ligne.getCell('max').numFmt = '0.0'
     ligne.getCell('ecart').numFmt = '+0.0;-0.0'
+    ligne.getCell('hygro').numFmt = '0'
+    ligne.getCell('hmin').numFmt = '0'
+    ligne.getCell('hmax').numFmt = '0'
     ligne.getCell('conf').alignment = { horizontal: 'center' }
+    ligne.getCell('hconf').alignment = { horizontal: 'center' }
 
-    if (!m.conforme) {
+    if (m.hygro_conforme === false) {
+      ;['hygro', 'hconf'].forEach((k) => {
+        ligne.getCell(k).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ROUGE_FOND } }
+        ligne.getCell(k).font = { bold: true, color: { argb: ROUGE_TEXTE } }
+      })
+    }
+
+    if (m.en_descente) {
+      // Mise en froid : signalée en bleu, jamais comptée comme un dépassement.
+      ;['temp', 'conf', 'descente'].forEach((k) => {
+        ligne.getCell(k).font = { bold: true, color: { argb: 'FF0369A1' } }
+      })
+    } else if (m.conforme === false) {
       ;['temp', 'conf', 'ecart'].forEach((k) => {
         ligne.getCell(k).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ROUGE_FOND } }
         ligne.getCell(k).font = { bold: true, color: { argb: ROUGE_TEXTE } }

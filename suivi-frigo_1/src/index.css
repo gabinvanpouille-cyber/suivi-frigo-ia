@@ -196,6 +196,9 @@ textarea { min-height: 74px; resize: vertical; }
 
 .temp-input { font-size: 1.35rem !important; font-weight: 700; text-align: center;
               font-variant-numeric: tabular-nums; padding: .55rem !important; }
+.hygro-input { font-size: .95rem !important; font-weight: 650; text-align: center;
+               font-variant-numeric: tabular-nums; padding: .4rem !important;
+               color: var(--texte-doux); }
 
 /* ------------------------------ Boutons ----------------------------- */
 .btn {
@@ -271,6 +274,9 @@ td.num { font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowr
 }
 .ligne-frigo.conforme      { border-color: color-mix(in srgb, var(--vert) 45%, transparent); }
 .ligne-frigo.non-conforme  { border-color: var(--rouge); background: var(--rouge-fond); }
+/* Chambre en cours de mise en froid : ni verte ni rouge, simplement à part. */
+.ligne-frigo.en-descente   { border-color: var(--bleu); background: var(--bleu-fond); }
+.ligne-frigo.en-descente.non-conforme { border-color: var(--bleu); background: var(--bleu-fond); }
 .ligne-frigo .tete { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .55rem; }
 .ligne-frigo .tete strong { font-size: .98rem; }
 .ligne-frigo .tete .seuils { margin-left: auto; font-size: .76rem; color: var(--texte-faible);

@@ -12,12 +12,52 @@ import { IcCheck, IcPhoto, IcCroix, IcAlerte, IcRetour, IcThermo } from '../comp
 import Onglets from '../components/Onglets'
 import { useProduits, libelleProduit } from '../lib/produits'
 
+/* ---------------------------------------------------------------------
+   Brouillon local : un relevé en cours survit à la mise en veille du
+   téléphone, à un rechargement, ou à l'application fermée par le système.
+   Stocké sur l'appareil uniquement, effacé dès que le relevé est enregistré.
+   --------------------------------------------------------------------- */
+const clefBrouillon = (fermeId, produit, jour) =>
+  `suivi-frigo:brouillon:${fermeId}:${produit}:${jour}`
+
+function lireBrouillon(clef) {
+  try {
+    const brut = window.localStorage.getItem(clef)
+    return brut ? JSON.parse(brut) : null
+  } catch {
+    return null
+  }
+}
+
+function ecrireBrouillon(clef, valeur) {
+  try {
+    window.localStorage.setItem(clef, JSON.stringify(valeur))
+  } catch {
+    /* mode privé ou quota plein : on continue sans filet */
+  }
+}
+
+function effacerBrouillon(clef) {
+  try {
+    window.localStorage.removeItem(clef)
+  } catch {
+    /* sans importance */
+  }
+}
+
+/** Conformité de l'hygrométrie : null quand il n'y a rien à juger. */
+function hygroConforme(valeur, min, max) {
+  const v = versNombre(valeur)
+  if (v === null || min === null || min === undefined || max === null || max === undefined) return null
+  return v >= Number(min) && v <= Number(max)
+}
+
 export default function ReleveForm() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   // La saisie se fait toujours dans sa propre exploitation, même quand le
-  // siège est en train d’en consulter une autre.
+  // siège est en train d'en consulter une autre.
   const { profil, fermeSienne: ferme, estAdmin } = useAuth()
   const produits = useProduits()
 
@@ -38,6 +78,7 @@ export default function ReleveForm() {
   const [produit, setProduit] = useState(params.get('produit') || 'pdt')
 
   const auteurOrigine = useRef(null)
+  const [brouillonRepris, setBrouillonRepris] = useState(false)
   // Saisies conservees lorsqu'on bascule d'un onglet produit a l'autre.
   const brouillonLocal = useRef({})
   const remarquesLocales = useRef({})
@@ -63,7 +104,9 @@ export default function ReleveForm() {
         .select(
           'id, date_releve, heure_releve, statut, remarque, nb_modifications, auteur_id, produit,' +
           ' mesures(id, frigo_id, temperature, seuil_min, seuil_max, remarque, photo_url,' +
-          ' frigo:frigos(id, nom, emplacement, temp_min, temp_max, ordre))'
+          ' hygrometrie, seuil_hygro_min, seuil_hygro_max, en_descente,' +
+          ' frigo:frigos(id, nom, emplacement, temp_min, temp_max, ordre,' +
+          ' suivi_hygro, hygro_min, hygro_max))'
         )
         .eq('id', id)
         .maybeSingle()
@@ -81,7 +124,7 @@ export default function ReleveForm() {
     /* 2. Les chambres froides de ce produit uniquement. */
     const { data: frigos, error: eFrigos } = await supabase
       .from('frigos')
-      .select('id, nom, emplacement, temp_min, temp_max, ordre')
+      .select('id, nom, emplacement, temp_min, temp_max, ordre, suivi_hygro, hygro_min, hygro_max')
       .eq('ferme_id', ferme.id)
       .eq('produit', prod)
       .eq('actif', true)
@@ -95,17 +138,37 @@ export default function ReleveForm() {
     }
 
     /* 3. Nouveau relevé : lignes vierges, ou saisies déjà faites si l'on
-          revient sur un onglet commencé. */
+          revient sur un onglet commencé, ou brouillon retrouvé sur l'appareil. */
     if (!id) {
       const conserve = brouillonLocal.current[prod]
-      setLignes(
-        conserve ??
-          (frigos ?? []).map((f) => ({
-            frigo: f, mesureId: null, temperature: '', remarqueMesure: '',
-            photoChemin: null, fichier: null,
-          }))
+      const vierges = (frigos ?? []).map((f) => ({
+        frigo: f, mesureId: null, temperature: '', hygrometrie: '',
+        enDescente: false, remarqueMesure: '', photoChemin: null, fichier: null,
+      }))
+
+      if (conserve) {
+        setLignes(conserve)
+        setRemarque(remarquesLocales.current[prod] ?? '')
+        setChargement(false)
+        return
+      }
+
+      /* Rien en mémoire : on regarde si le téléphone a gardé un relevé en
+         cours (mise en veille, rechargement, application fermée). */
+      const enregistre = lireBrouillon(clefBrouillon(ferme.id, prod, dateReleve))
+      const saisies = enregistre?.lignes ?? {}
+      const quelqueChose = Object.values(saisies).some(
+        (v) => v && (v.temperature || v.hygrometrie || v.enDescente || v.remarqueMesure)
       )
-      setRemarque(remarquesLocales.current[prod] ?? '')
+
+      setLignes(
+        quelqueChose
+          ? vierges.map((l) => ({ ...l, ...(saisies[l.frigo.id] ?? {}) }))
+          : vierges
+      )
+      setRemarque(quelqueChose ? enregistre.remarque ?? '' : remarquesLocales.current[prod] ?? '')
+      if (quelqueChose && enregistre.heure) setHeure(enregistre.heure)
+      setBrouillonRepris(quelqueChose)
       setChargement(false)
       return
     }
@@ -134,11 +197,16 @@ export default function ReleveForm() {
           mesureId: m?.id ?? null,
           temperature: m?.temperature !== undefined && m?.temperature !== null
             ? String(m.temperature).replace('.', ',') : '',
+          hygrometrie: m?.hygrometrie !== undefined && m?.hygrometrie !== null
+            ? String(m.hygrometrie).replace('.', ',') : '',
+          enDescente: m?.en_descente ?? false,
           remarqueMesure: m?.remarque ?? '',
           photoChemin: m?.photo_url ?? null,
           fichier: null,
           seuilMin: m?.seuil_min ?? f.temp_min,
           seuilMax: m?.seuil_max ?? f.temp_max,
+          seuilHygroMin: m?.seuil_hygro_min ?? f.hygro_min,
+          seuilHygroMax: m?.seuil_hygro_max ?? f.hygro_max,
         }
       })
 
@@ -148,6 +216,53 @@ export default function ReleveForm() {
   }, [ferme, id, produitDemande])
 
   useEffect(() => { charger() }, [charger])
+
+  /* Sauvegarde continue du relevé en cours sur l'appareil. Les photos ne
+     peuvent pas être conservées ainsi : elles sont à reprendre. */
+  useEffect(() => {
+    if (id || chargement || !ferme || !lignes.length) return
+    const saisies = {}
+    lignes.forEach((l) => {
+      if (l.temperature || l.hygrometrie || l.enDescente || l.remarqueMesure) {
+        saisies[l.frigo.id] = {
+          temperature: l.temperature,
+          hygrometrie: l.hygrometrie,
+          enDescente: !!l.enDescente,
+          remarqueMesure: l.remarqueMesure,
+        }
+      }
+    })
+    const clef = clefBrouillon(ferme.id, produit, dateReleve)
+    if (!Object.keys(saisies).length && !remarque) effacerBrouillon(clef)
+    else ecrireBrouillon(clef, { heure, remarque, lignes: saisies })
+  }, [id, chargement, ferme, produit, dateReleve, heure, remarque, lignes])
+
+  /* Empêche l'écran de s'éteindre pendant la saisie, quand le navigateur
+     le permet. Le verrou est repris au retour d'arrière-plan. */
+  useEffect(() => {
+    if (id || !('wakeLock' in navigator)) return
+    let verrou = null
+    let vivant = true
+
+    const demander = async () => {
+      if (!vivant || document.visibilityState !== 'visible') return
+      try {
+        verrou = await navigator.wakeLock.request('screen')
+      } catch {
+        /* refusé (batterie faible, onglet masqué) : la saisie reste protégée
+           par la sauvegarde automatique ci-dessus */
+      }
+    }
+    const auRetour = () => { if (document.visibilityState === 'visible') demander() }
+
+    demander()
+    document.addEventListener('visibilitychange', auRetour)
+    return () => {
+      vivant = false
+      document.removeEventListener('visibilitychange', auRetour)
+      try { verrou?.release() } catch { /* déjà relâché */ }
+    }
+  }, [id])
 
   /* Bascule d'onglet : on mémorise ce qui a déjà été saisi pour y revenir. */
   const changerProduit = (code) => {
@@ -188,6 +303,9 @@ export default function ReleveForm() {
   const horsSeuils = useMemo(
     () =>
       lignes.filter((l) => {
+        // Une chambre en descente de température n'est pas jugée : ni hors
+        // seuil, ni alerte. La mesure est néanmoins enregistrée.
+        if (l.enDescente) return false
         const min = l.seuilMin ?? l.frigo.temp_min
         const max = l.seuilMax ?? l.frigo.temp_max
         return estConforme(l.temperature, min, max) === false
@@ -274,10 +392,15 @@ export default function ReleveForm() {
           if (l.mesureId) aSupprimer.push(l.mesureId)
           return
         }
+        // L'hygrométrie est facultative : absente, elle vaut null, pas zéro.
+        const hygro = l.frigo.suivi_hygro ? versNombre(l.hygrometrie) : null
+
         if (l.mesureId) {
           aMettreAJour.push({
             id: l.mesureId,
             temperature: valeur,
+            hygrometrie: hygro,
+            en_descente: !!l.enDescente,
             remarque: l.remarqueMesure || null,
             photo_url: l.photoChemin,
           })
@@ -288,6 +411,10 @@ export default function ReleveForm() {
             temperature: valeur,
             seuil_min: l.frigo.temp_min,
             seuil_max: l.frigo.temp_max,
+            hygrometrie: hygro,
+            seuil_hygro_min: l.frigo.suivi_hygro ? l.frigo.hygro_min : null,
+            seuil_hygro_max: l.frigo.suivi_hygro ? l.frigo.hygro_max : null,
+            en_descente: !!l.enDescente,
             remarque: l.remarqueMesure || null,
             photo_url: l.photoChemin,
           })
@@ -315,6 +442,7 @@ export default function ReleveForm() {
 
       delete brouillonLocal.current[produit]
       delete remarquesLocales.current[produit]
+      effacerBrouillon(clefBrouillon(ferme.id, produit, dateReleve))
 
       navigate(estAdmin ? '/admin/releves' : '/', {
         replace: true,
@@ -369,6 +497,13 @@ export default function ReleveForm() {
       )}
 
       <Message type="ko" onFermer={() => setErreur('')}>{erreur}</Message>
+
+      {brouillonRepris && (
+        <Message type="info" onFermer={() => setBrouillonRepris(false)}>
+          Relevé en cours retrouvé sur cet appareil : vos saisies ont été
+          restaurées. Les photos, elles, sont à reprendre.
+        </Message>
+      )}
 
       {enModification && (
         <Message type="att">
@@ -427,7 +562,10 @@ export default function ReleveForm() {
       {lignes.map((l) => {
         const min = l.seuilMin ?? l.frigo.temp_min
         const max = l.seuilMax ?? l.frigo.temp_max
-        const conforme = estConforme(l.temperature, min, max)
+        const hMin = l.seuilHygroMin ?? l.frigo.hygro_min
+        const hMax = l.seuilHygroMax ?? l.frigo.hygro_max
+        const conforme = l.enDescente ? null : estConforme(l.temperature, min, max)
+        const hOk = l.enDescente ? null : hygroConforme(l.hygrometrie, hMin, hMax)
         const apercuLocal = urls[`local-${l.frigo.id}`]
         const apercuServeur = l.photoChemin ? urls[l.photoChemin] : null
         const photo = apercuLocal || apercuServeur
@@ -435,38 +573,81 @@ export default function ReleveForm() {
         return (
           <div
             key={l.frigo.id}
-            className={`ligne-frigo ${conforme === true ? 'conforme' : ''} ${conforme === false ? 'non-conforme' : ''}`}
+            className={`ligne-frigo ${l.enDescente ? 'en-descente' : ''} ${conforme === true ? 'conforme' : ''} ${conforme === false ? 'non-conforme' : ''}`}
           >
             <div className="tete">
               <strong>{l.frigo.nom}</strong>
               {l.frigo.emplacement && <span className="tres-petit muet">{l.frigo.emplacement}</span>}
+              {l.enDescente && <Etiquette type="info">en descente</Etiquette>}
               <span className="seuils">
                 {temp(min)} → {temp(max)}
+                {l.frigo.suivi_hygro && hMin !== null && hMin !== undefined
+                  && hMax !== null && hMax !== undefined && (
+                  <>
+                    <br />
+                    {Number(hMin).toFixed(0)}–{Number(hMax).toFixed(0)} % HR
+                  </>
+                )}
               </span>
             </div>
 
             <div className="saisie">
-              <input
-                className="temp-input"
-                type="text"
-                inputMode="decimal"
-                enterKeyHint="next"
-                placeholder="—"
-                aria-label={`Température ${l.frigo.nom}`}
-                value={l.temperature}
-                onChange={(e) =>
-                  majLigne(l.frigo.id, { temperature: e.target.value.replace(/[^0-9,.\-]/g, '') })
-                }
-                style={
-                  conforme === false
-                    ? { borderColor: 'var(--rouge)', color: 'var(--rouge)' }
-                    : conforme === true
-                    ? { borderColor: 'var(--vert)' }
-                    : undefined
-                }
-              />
+              <div className="pile" style={{ gap: '.4rem' }}>
+                <input
+                  className="temp-input"
+                  type="text"
+                  inputMode="decimal"
+                  enterKeyHint="next"
+                  placeholder="—"
+                  aria-label={`Température ${l.frigo.nom}`}
+                  value={l.temperature}
+                  onChange={(e) =>
+                    majLigne(l.frigo.id, { temperature: e.target.value.replace(/[^0-9,.\-]/g, '') })
+                  }
+                  style={
+                    conforme === false
+                      ? { borderColor: 'var(--rouge)', color: 'var(--rouge)' }
+                      : conforme === true
+                      ? { borderColor: 'var(--vert)' }
+                      : undefined
+                  }
+                />
+
+                {/* Hygrométrie : proposée seulement où elle est suivie, et jamais obligatoire. */}
+                {l.frigo.suivi_hygro && (
+                  <input
+                    className="hygro-input"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="% HR"
+                    aria-label={`Hygrométrie ${l.frigo.nom} (facultatif)`}
+                    value={l.hygrometrie ?? ''}
+                    onChange={(e) =>
+                      majLigne(l.frigo.id, { hygrometrie: e.target.value.replace(/[^0-9,.]/g, '') })
+                    }
+                    style={
+                      hOk === false
+                        ? { borderColor: 'var(--rouge)', color: 'var(--rouge)' }
+                        : hOk === true
+                        ? { borderColor: 'var(--vert)' }
+                        : undefined
+                    }
+                  />
+                )}
+              </div>
 
               <div className="pile" style={{ gap: '.45rem' }}>
+                {/* Descente de température : à réarmer à chaque relevé, jamais reportée. */}
+                <button
+                  type="button"
+                  className={`btn petit ${l.enDescente ? 'principal' : 'fantome'}`}
+                  aria-pressed={l.enDescente}
+                  onClick={() => majLigne(l.frigo.id, { enDescente: !l.enDescente })}
+                  title="Chambre en cours de mise en froid : la température est enregistrée sans déclencher d’alerte"
+                >
+                  <IcThermo />
+                  {l.enDescente ? 'En descente' : 'Signaler une descente'}
+                </button>
                 <input
                   type="text"
                   placeholder="Remarque (facultatif)"
@@ -475,6 +656,16 @@ export default function ReleveForm() {
                   onChange={(e) => majLigne(l.frigo.id, { remarqueMesure: e.target.value })}
                 />
                 <div className="rangee" style={{ gap: '.45rem' }}>
+                  {/* Mise en froid : à réarmer à chaque relevé, jamais reporté. */}
+                  <button
+                    type="button"
+                    className={`btn petit ${l.enDescente ? 'principal' : 'fantome'}`}
+                    aria-pressed={l.enDescente ? 'true' : 'false'}
+                    onClick={() => majLigne(l.frigo.id, { enDescente: !l.enDescente })}
+                    title="La chambre est en cours de mise en froid : la température est enregistrée mais pas jugée"
+                  >
+                    <IcThermo /> En descente
+                  </button>
                   {photo ? (
                     <>
                       <img
@@ -511,6 +702,26 @@ export default function ReleveForm() {
               <div className="tres-petit gras mt" style={{ color: 'var(--rouge)' }}>
                 <IcAlerte style={{ width: 13, height: 13, verticalAlign: '-2px' }} />{' '}
                 {ecart(l.temperature, min, max)}
+              </div>
+            )}
+
+            {l.enDescente && (
+              <div className="tres-petit mt" style={{ color: 'var(--bleu)' }}>
+                Chambre en cours de descente : la température est enregistrée mais
+                n’est pas jugée, et ne déclenche aucune alerte.
+              </div>
+            )}
+
+            {hOk === false && (
+              <div className="tres-petit gras mt" style={{ color: 'var(--rouge)' }}>
+                Hygrométrie hors des seuils ({Number(hMin).toFixed(0)}–{Number(hMax).toFixed(0)} %)
+              </div>
+            )}
+
+            {l.enDescente && (
+              <div className="tres-petit mt" style={{ color: 'var(--bleu)' }}>
+                Chambre en descente de température : la mesure est enregistrée, mais elle n’est
+                ni jugée ni signalée. À réactiver au prochain relevé si besoin.
               </div>
             )}
           </div>

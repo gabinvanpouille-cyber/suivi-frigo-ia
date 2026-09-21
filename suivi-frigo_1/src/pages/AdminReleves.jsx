@@ -136,7 +136,9 @@ export default function AdminReleves() {
       .select(
         'id, date_releve, heure_releve, statut, remarque, nb_modifications, modifie_at, valide_at, created_at, auteur_nom,' +
         ' auteur:profiles(identifiant, nom_complet),' +
-        ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque, photo_url, frigo:frigos(nom, emplacement))'
+        ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque, photo_url, en_descente,' +
+        ' hygrometrie, seuil_hygro_min, seuil_hygro_max, hygro_conforme,' +
+        ' frigo:frigos(nom, emplacement))'
       )
       .eq('id', releveId)
       .maybeSingle()
@@ -163,6 +165,11 @@ export default function AdminReleves() {
 
   const nonConformes = filtrees.filter((m) => m.conforme === false).length
   const taux = pourcentage(filtrees.length - nonConformes, filtrees.length)
+
+  // Colonne hygrométrie affichée seulement si la période en contient.
+  const colonneHygro = filtrees.some(
+    (m) => m.hygrometrie !== null && m.hygrometrie !== undefined
+  )
 
   return (
     <>
@@ -256,7 +263,8 @@ export default function AdminReleves() {
             <thead>
               <tr>
                 <th>Date</th><th>Heure</th><th>Frigo</th><th>Temp.</th>
-                <th>Seuils</th><th>État</th><th>Salarié</th><th>Remarque</th>
+                <th>Seuils</th>{colonneHygro && <th>Hygro.</th>}
+                <th>État</th><th>Salarié</th><th>Remarque</th>
               </tr>
             </thead>
             <tbody>
@@ -274,8 +282,20 @@ export default function AdminReleves() {
                     {temp(m.temperature)}
                   </td>
                   <td className="num tres-petit muet">{temp(m.seuil_min)} → {temp(m.seuil_max)}</td>
+                  {colonneHygro && (
+                    <td
+                      className="num tres-petit"
+                      style={{ color: m.hygro_conforme === false ? 'var(--rouge)' : undefined }}
+                    >
+                      {m.hygrometrie === null || m.hygrometrie === undefined
+                        ? '—'
+                        : `${Number(m.hygrometrie).toFixed(0)} %`}
+                    </td>
+                  )}
                   <td>
-                    {m.conforme === false
+                    {m.en_descente
+                      ? <Etiquette type="info">En descente</Etiquette>
+                      : m.conforme === false
                       ? <Etiquette type="ko">Hors seuil</Etiquette>
                       : <Etiquette type="ok">Conforme</Etiquette>}
                     {m.nb_modifications > 0 && <Etiquette type="info">modifié</Etiquette>}
@@ -336,11 +356,12 @@ export default function AdminReleves() {
           {(detail.mesures ?? []).map((m) => (
             <div
               key={m.id}
-              className={`ligne-frigo ${m.conforme ? 'conforme' : 'non-conforme'}`}
+              className={`ligne-frigo ${m.en_descente ? 'en-descente' : m.conforme ? 'conforme' : 'non-conforme'}`}
               style={{ marginBottom: '.55rem' }}
             >
               <div className="tete">
                 <strong>{m.frigo?.nom}</strong>
+                {m.en_descente && <Etiquette type="info">en descente</Etiquette>}
                 <span className="seuils">{temp(m.seuil_min)} → {temp(m.seuil_max)}</span>
               </div>
               <div className="rangee" style={{ gap: '.6rem' }}>
@@ -353,6 +374,17 @@ export default function AdminReleves() {
                 {m.conforme === false && (
                   <span className="tres-petit gras" style={{ color: 'var(--rouge)' }}>
                     {ecart(m.temperature, m.seuil_min, m.seuil_max)}
+                  </span>
+                )}
+                {m.hygrometrie !== null && m.hygrometrie !== undefined && (
+                  <span
+                    className="gras"
+                    style={{
+                      fontSize: '1rem',
+                      color: m.hygro_conforme === false ? 'var(--rouge)' : 'var(--texte-doux)',
+                    }}
+                  >
+                    {Number(m.hygrometrie).toFixed(0)} % HR
                   </span>
                 )}
                 {m.photo_url && detail.photos?.[m.photo_url] && (
