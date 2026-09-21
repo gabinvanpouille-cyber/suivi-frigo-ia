@@ -63,6 +63,19 @@ export function FournisseurAuth({ children }) {
   /* Le siège — l'administrateur général — peut consulter les autres
      exploitations. Personne d'autre ne charge cette liste, et les règles de
      la base la refuseraient de toute façon. */
+  const chargerFermes = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('fermes')
+      .select('*')
+      .eq('actif', true)
+      .order('nom')
+    if (error) {
+      console.warn('[SUIVI FRIGO] Exploitations illisibles :', error.message)
+      return null
+    }
+    return data ?? []
+  }, [])
+
   useEffect(() => {
     if (profil?.role !== 'super_admin') {
       setFermes([])
@@ -70,17 +83,17 @@ export function FournisseurAuth({ children }) {
       return
     }
     let vivant = true
-    supabase
-      .from('fermes')
-      .select('*')
-      .eq('actif', true)
-      .order('nom')
-      .then(({ data, error }) => {
-        if (error) console.warn('[SUIVI FRIGO] Exploitations illisibles :', error.message)
-        if (vivant) setFermes(data ?? [])
-      })
+    chargerFermes().then((liste) => { if (vivant && liste) setFermes(liste) })
     return () => { vivant = false }
-  }, [profil?.id, profil?.role])
+  }, [profil?.id, profil?.role, chargerFermes])
+
+  /* Après un enregistrement, cette liste doit être relue : sans cela l'écran
+     continue d'afficher les anciennes valeurs de l'exploitation consultée. */
+  const rafraichirFermes = useCallback(async () => {
+    if (profil?.role !== 'super_admin') return
+    const liste = await chargerFermes()
+    if (liste) setFermes(liste)
+  }, [profil?.role, chargerFermes])
 
   const connexion = useCallback(
     async (codeFerme, identifiant, motDePasse) => {
@@ -155,6 +168,7 @@ export function FournisseurAuth({ children }) {
     connexion,
     deconnexion,
     rafraichirProfil,
+    rafraichirFermes,
   }
 
   return <Contexte.Provider value={valeur}>{children}</Contexte.Provider>

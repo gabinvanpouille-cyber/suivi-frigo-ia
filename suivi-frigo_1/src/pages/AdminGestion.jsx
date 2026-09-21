@@ -16,16 +16,23 @@ import {
 const ROLES = { super_admin: 'Administrateur général', admin: 'Administrateur', salarie: 'Salarié' }
 
 export default function AdminGestion() {
-  const { profil, ferme, estSuperAdmin, rafraichirProfil } = useAuth()
+  const { profil, ferme, estSuperAdmin, rafraichirProfil, rafraichirFermes } = useAuth()
   const [onglet, setOnglet] = useState('frigos')
   const [msg, setMsg] = useState(null)
+
+  /* Un enregistrement touche à la fois le profil (son exploitation) et la
+     liste du siège : on relit les deux, sinon l'écran reste en arrière. */
+  const rafraichirTout = useCallback(async () => {
+    await rafraichirProfil()
+    await rafraichirFermes?.()
+  }, [rafraichirProfil, rafraichirFermes])
 
   const onglets = [
     { cle: 'frigos', libelle: 'Frigos', Icone: IcFrigo },
     { cle: 'comptes', libelle: 'Comptes', Icone: IcUtilisateurs },
-    { cle: 'exploitation', libelle: 'Exploitation', Icone: IcReglages },
+    { cle: 'exploitation', libelle: 'Réglages', Icone: IcReglages },
     ...(estSuperAdmin
-      ? [{ cle: 'fermes', libelle: 'Exploitations', Icone: IcFermeBatiment }]
+      ? [{ cle: 'fermes', libelle: 'Toutes les exploitations', Icone: IcFermeBatiment }]
       : []),
   ]
 
@@ -53,10 +60,10 @@ export default function AdminGestion() {
       {onglet === 'frigos' && <OngletFrigos ferme={ferme} setMsg={setMsg} />}
       {onglet === 'comptes' && <OngletComptes ferme={ferme} profil={profil} setMsg={setMsg} />}
       {onglet === 'exploitation' && (
-        <OngletExploitation ferme={ferme} setMsg={setMsg} onMaj={rafraichirProfil} />
+        <OngletExploitation ferme={ferme} setMsg={setMsg} onMaj={rafraichirTout} />
       )}
       {onglet === 'fermes' && (
-        <OngletFermes profil={profil} setMsg={setMsg} onMaj={rafraichirProfil} />
+        <OngletFermes profil={profil} setMsg={setMsg} onMaj={rafraichirTout} />
       )}
     </>
   )
