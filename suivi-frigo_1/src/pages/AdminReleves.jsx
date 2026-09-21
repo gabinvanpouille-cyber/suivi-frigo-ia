@@ -136,7 +136,7 @@ export default function AdminReleves() {
       .select(
         'id, date_releve, heure_releve, statut, remarque, nb_modifications, modifie_at, valide_at, created_at, auteur_nom,' +
         ' auteur:profiles(identifiant, nom_complet),' +
-        ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque, photo_url,' +
+        ' mesures(id, temperature, seuil_min, seuil_max, conforme, remarque, photo_url, en_descente,' +
         ' hygrometrie, seuil_hygro_min, seuil_hygro_max, hygro_conforme,' +
         ' frigo:frigos(nom, emplacement))'
       )
@@ -293,7 +293,9 @@ export default function AdminReleves() {
                     </td>
                   )}
                   <td>
-                    {m.conforme === false
+                    {m.en_descente
+                      ? <Etiquette type="info">En descente</Etiquette>
+                      : m.conforme === false
                       ? <Etiquette type="ko">Hors seuil</Etiquette>
                       : <Etiquette type="ok">Conforme</Etiquette>}
                     {m.nb_modifications > 0 && <Etiquette type="info">modifié</Etiquette>}
@@ -354,11 +356,12 @@ export default function AdminReleves() {
           {(detail.mesures ?? []).map((m) => (
             <div
               key={m.id}
-              className={`ligne-frigo ${m.conforme ? 'conforme' : 'non-conforme'}`}
+              className={`ligne-frigo ${m.en_descente ? 'en-descente' : m.conforme ? 'conforme' : 'non-conforme'}`}
               style={{ marginBottom: '.55rem' }}
             >
               <div className="tete">
                 <strong>{m.frigo?.nom}</strong>
+                {m.en_descente && <Etiquette type="info">en descente</Etiquette>}
                 <span className="seuils">{temp(m.seuil_min)} → {temp(m.seuil_max)}</span>
               </div>
               <div className="rangee" style={{ gap: '.6rem' }}>
